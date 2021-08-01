@@ -20,7 +20,10 @@ class LexError(Exception):
 
 
 # Token class.  This class is used to represent the tokens produced.
-class LexToken(object):
+class LexToken:
+    def __init__(self):
+        self.type = self.value = self.lineno = self.lexpos = None
+
     def __str__(self):
         return 'LexToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
 
@@ -79,11 +82,11 @@ class LexerRule:
         self.token_value_handler = None
 
     def __repr__(self) -> str:
-        s = '({}, {}) -> '.format(self.states, self.patterns)
+        s = '(%s, %s) -> ' % (self.states, self.patterns)
         if self.token_handler:
-            s += '({})'.format(self.token_handler)
+            s += '(%s)' % (self.token_handler,)
         else:
-            s += '({}, {})'.format(self.token_type, self.token_value_handler)
+            s += '(%s, %s)' % (self.token_type, self.token_value_handler)
         return s
 
 
@@ -148,28 +151,21 @@ def _add_errorf(lexer, state, f):
 
 def _add_states(lexer, state_list):
     lexer._states['INITIAL'] = 'inclusive'
-    if state_list is None or not isinstance(state_list, (tuple, list)):
-        lexer.log.error('states must be defined as a tuple or list')
-        lexer.error = True
+    if state_list is None:
         return
+    try:
+        _ = iter(state_list)
+    except TypeError:
+        raise TypeError('states must be iterable')
+
     for s in state_list:
         if not isinstance(s, tuple) or len(s) != 2:
-            lexer.log.error("Invalid state specifier %s. Must be a tuple (statename,'exclusive|inclusive')", repr(s))
-            lexer.error = True
-            continue
+            raise ValueError("Invalid state specifier %s. Must be a tuple (statename,'exclusive|inclusive')" % repr(s))
         state_name, state_type = s
-        if not isinstance(state_name, StringTypes):
-            lexer.log.error('State name %s must be a string', repr(state_name))
-            lexer.error = True
-            continue
         if not (state_type == 'inclusive' or state_type == 'exclusive'):
-            lexer.log.error("State type for state %s must be 'inclusive' or 'exclusive'", state_name)
-            lexer.error = True
-            continue
+            raise ValueError("State type for state %s must be 'inclusive' or 'exclusive'" % state_name)
         if state_name in lexer._states:
-            lexer.log.error("State '%s' already defined", state_name)
-            lexer.error = True
-            continue
+            raise ValueError("State '%s' already defined" % state_name)
         lexer._states[state_name] = state_type
 
 
@@ -178,7 +174,6 @@ class LexerStoreProxy:
         self._rules = []
         self._states = {}
         self._errorfs = {}
-        self.log = PlyLogger(sys.stderr)
 
 
 class LexerMeta(type):
@@ -195,8 +190,6 @@ class LexerMeta(type):
         self._rules = proxy._rules
         self._errorfs = proxy._errorfs
 
-        self.log = PlyLogger(sys.stderr)
-
         if hasattr(self, 'states'):
             _add_states(self, self.states)
             del self.states
@@ -212,7 +205,7 @@ class LexerMeta(type):
             self._reflags = self.reflags
             del self.reflags
         else:
-            self._reflags = re.VERBOSE
+            self._reflags = re.VERBOSE  # default value
 
         for r in self._rules:
             _complete_rule(r, reflag=self._reflags)
@@ -314,129 +307,6 @@ class Lexer(metaclass=LexerMeta):
     def skip(self, n):
         self.lexpos += n
 
-    def _token(self):
-        # Make local copies of frequently referenced attributes
-        lexpos = self.lexpos
-        lexlen = self.lexlen
-        lexignore = self.lexignore
-        lexdata = self.lexdata
-
-        while lexpos < lexlen:
-            # This code provides some short-circuit code for whitespace, tabs, and other ignored characters
-            if lexdata[lexpos] in lexignore:
-                lexpos += 1
-                continue
-
-            # Look for a regular expression match
-            for lexre, lexindexfunc in self.lexre:
-                best_match = None
-                best_rule = None
-                for rule in self.lexrules:
-                    recomp = rule[0]
-                    m = recomp.match(lexdata, lexpos)
-                    if not m:
-                        continue
-                    if not best_match or len(m.group()) > len(best_match.group()):
-                        best_match = m
-                        best_rule = rule
-
-                m = best_match
-
-                # m = lexre.match(lexdata, lexpos)
-                # if not m:
-                #     continue
-
-                # Create a token for return
-                tok = LexToken()
-                tok.value = m.group()
-                tok.lineno = self.lineno
-                tok.lexpos = lexpos
-
-                i = m.lastindex
-                # func, tok.type = lexindexfunc[i]
-                func, tok.type = best_rule[2]
-
-                if not func:
-                    # If no token type was set, it's an ignored token
-                    if tok.type:
-                        self.lexpos = m.end()
-                        return tok
-                    else:
-                        lexpos = m.end()
-                        break
-
-                lexpos = m.end()
-
-                # If token is processed by a function, call it
-
-                tok.lexer = self      # Set additional attributes useful in token rules
-                self.lexmatch = m
-                self.lexpos = lexpos
-
-                newtok = func(tok)
-
-                # Every function must return a token, if nothing, we just move to next token
-                if not newtok:
-                    lexpos = self.lexpos         # This is here in case user has updated lexpos.
-                    lexignore = self.lexignore      # This is here in case there was a state change
-                    break
-
-                # Verify type of the token.  If not in the token map, raise an error
-                if not self.lexoptimize:
-                    if newtok.type not in self.lextokens_all:
-                        raise LexError("%s:%d: Rule '%s' returned an unknown token type '%s'" % (
-                            func.__code__.co_filename, func.__code__.co_firstlineno,
-                            func.__name__, newtok.type), lexdata[lexpos:])
-
-                return newtok
-            else:
-                # No match, see if in literals
-                if lexdata[lexpos] in self.lexliterals:
-                    tok = LexToken()
-                    tok.value = lexdata[lexpos]
-                    tok.lineno = self.lineno
-                    tok.type = tok.value
-                    tok.lexpos = lexpos
-                    self.lexpos = lexpos + 1
-                    return tok
-
-                # No match. Call t_error() if defined.
-                if self.lexerrorf:
-                    tok = LexToken()
-                    tok.value = self.lexdata[lexpos:]
-                    tok.lineno = self.lineno
-                    tok.type = 'error'
-                    tok.lexer = self
-                    tok.lexpos = lexpos
-                    self.lexpos = lexpos
-                    newtok = self.lexerrorf(tok)
-                    if lexpos == self.lexpos:
-                        # Error method didn't change text position at all. This is an error.
-                        raise LexError("Scanning error. Illegal character '%s'" % (lexdata[lexpos]), lexdata[lexpos:])
-                    lexpos = self.lexpos
-                    if not newtok:
-                        continue
-                    return newtok
-
-                self.lexpos = lexpos
-                raise LexError("Illegal character '%s' at index %d" % (lexdata[lexpos], lexpos), lexdata[lexpos:])
-
-        if self.lexeoff:
-            tok = LexToken()
-            tok.type = 'eof'
-            tok.value = ''
-            tok.lineno = self.lineno
-            tok.lexpos = lexpos
-            tok.lexer = self
-            self.lexpos = lexpos
-            newtok = self.lexeoff(tok)
-            return newtok
-
-        self.lexpos = lexpos + 1
-        if self.lexdata is None:
-            raise RuntimeError('No input string given with input()')
-        return None
-
     def token(self):
         lexpos = self.lexpos
         lexlen = self.lexlen
@@ -525,7 +395,7 @@ class Lexer(metaclass=LexerMeta):
                 self.lexpos = lexpos
                 raise LexError("Illegal character '%s' at index %d" % (lexdata[lexpos], lexpos), lexdata[lexpos:])
 
-        raise LexError('Wrong flow')
+        assert False
 
     # Iterator interface
     def __iter__(self):
