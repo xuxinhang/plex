@@ -2,8 +2,6 @@ import re
 import sys
 import types
 
-from ply.lex import Token
-
 # This tuple contains known string types
 try:
     # Python 2.6
@@ -180,7 +178,6 @@ class LexerStoreProxy:
         self._rules = []
         self._states = {}
         self._errorfs = {}
-        self.logger = PlyLogger(sys.stderr)
         self.log = PlyLogger(sys.stderr)
 
 
@@ -193,12 +190,12 @@ class LexerMeta(type):
         return {'__': lambda *args: _create_rule_adder(proxy, *args)}
 
     def __init__(self, name, bases, namespace):
-        proxy = self.__class__._store_proxies[name];
+        proxy = self.__class__._store_proxies[name]
         self._states = proxy._states
         self._rules = proxy._rules
         self._errorfs = proxy._errorfs
 
-        self.logger = self.log = PlyLogger(sys.stderr)
+        self.log = PlyLogger(sys.stderr)
 
         if hasattr(self, 'states'):
             _add_states(self, self.states)
@@ -238,9 +235,6 @@ def sample_match(pattern, ignorecase, s, start=0, end=None):
 class Lexer(metaclass=LexerMeta):
     def __init__(self):
         self.lexre = None             # Master regular expression. This is a list of
-                                      # tuples (re, findex) where re is a compiled
-                                      # regular expression and findex is a list
-                                      # mapping regex group numbers to rules
         self.lexretext = None         # Current regular expression strings
         self.lexstatere = {}          # Dictionary mapping lexer states to master regexs
         self.lexstateretext = {}      # Dictionary mapping lexer states to regex strings
@@ -283,15 +277,6 @@ class Lexer(metaclass=LexerMeta):
         self.lexlen = len(s)
 
     def _activate_state(self, state):
-        # if state not in self.lexstatere:
-        #     raise ValueError('Undefined state')
-        # self.lexre = self.lexstatere[state]
-        # self.lexretext = self.lexstateretext[state]
-        # self.lexignore = self.lexstateignore.get(state, '')
-        # self.lexerrorf = self.lexstateerrorf.get(state, None)
-        # self.lexeoff = self.lexstateeoff.get(state, None)
-        # self.lexstate = state
-
         cls = self.__class__
 
         if state not in cls._states:
@@ -331,10 +316,10 @@ class Lexer(metaclass=LexerMeta):
 
     def _token(self):
         # Make local copies of frequently referenced attributes
-        lexpos    = self.lexpos
-        lexlen    = self.lexlen
+        lexpos = self.lexpos
+        lexlen = self.lexlen
         lexignore = self.lexignore
-        lexdata   = self.lexdata
+        lexdata = self.lexdata
 
         while lexpos < lexlen:
             # This code provides some short-circuit code for whitespace, tabs, and other ignored characters
@@ -345,7 +330,7 @@ class Lexer(metaclass=LexerMeta):
             # Look for a regular expression match
             for lexre, lexindexfunc in self.lexre:
                 best_match = None
-                best_rule  = None
+                best_rule = None
                 for rule in self.lexrules:
                     recomp = rule[0]
                     m = recomp.match(lexdata, lexpos)
@@ -353,7 +338,7 @@ class Lexer(metaclass=LexerMeta):
                         continue
                     if not best_match or len(m.group()) > len(best_match.group()):
                         best_match = m
-                        best_rule  = rule
+                        best_rule = rule
 
                 m = best_match
 
@@ -392,7 +377,7 @@ class Lexer(metaclass=LexerMeta):
 
                 # Every function must return a token, if nothing, we just move to next token
                 if not newtok:
-                    lexpos    = self.lexpos         # This is here in case user has updated lexpos.
+                    lexpos = self.lexpos         # This is here in case user has updated lexpos.
                     lexignore = self.lexignore      # This is here in case there was a state change
                     break
 
@@ -453,9 +438,9 @@ class Lexer(metaclass=LexerMeta):
         return None
 
     def token(self):
-        lexpos    = self.lexpos
-        lexlen    = self.lexlen
-        lexdata   = self.lexdata
+        lexpos = self.lexpos
+        lexlen = self.lexlen
+        lexdata = self.lexdata
 
         while lexpos <= lexlen:
             match_obj, match_endpos, match_group, match_len, rule = None, 0, '', 0, None
@@ -501,7 +486,7 @@ class Lexer(metaclass=LexerMeta):
                         return newtok
 
                     # Every function must return a token, if nothing, we just move to next token
-                    lexpos    = self.lexpos         # This is here in case user has updated lexpos.
+                    lexpos = self.lexpos         # This is here in case user has updated lexpos.
                     lexignore = self.lexignore      # This is here in case there was a state change
                 else:
                     # If no token type was set, it's an ignored token
@@ -527,7 +512,7 @@ class Lexer(metaclass=LexerMeta):
                     tok.lexer = self
                     tok.lexpos = lexpos
                     self.lexpos = lexpos
-                    newtok = self.lexerrorf(tok)
+                    newtok = self._active_errorf(tok)
                     if lexpos == self.lexpos:
                         # Error method didn't change text position at all. This is an error.
                         raise LexError("Scanning error. Illegal character '%s'" % (lexdata[lexpos]), lexdata[lexpos:])
@@ -551,5 +536,3 @@ class Lexer(metaclass=LexerMeta):
         if t is None:
             raise StopIteration
         return t
-
-

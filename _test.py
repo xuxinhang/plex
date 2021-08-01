@@ -1,4 +1,3 @@
-from enum import Enum
 from plex import Lexer
 
 
@@ -18,7 +17,7 @@ class CalcLexer(Lexer):
 
     __(r'\+')('PLUS')
     __(r'-')('MINUS')
-    __(r'\*')('TIMES' )
+    __(r'\*')('TIMES')
     __(r'/')('DIVIDE')
     __(r'\(')('LPAREN')
     __(r'\)')('RPAREN')
