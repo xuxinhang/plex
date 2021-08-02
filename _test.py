@@ -13,7 +13,6 @@ from plex import Lexer
 
 
 class CalcLexer(Lexer):
-    states = set(['HELLO'])
 
     __(r'\+')('PLUS')
     __(r'-')('MINUS')

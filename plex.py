@@ -1,5 +1,5 @@
+from ast import parse
 import re
-import sys
 import types
 
 # This tuple contains known string types
@@ -67,22 +67,18 @@ def wrap_list(x):
         return iter([x])
 
 
-RULE_MATCH_MODE_STR = 1
-RULE_MATCH_MODE_REG = 2
-
-
-class LexerRule:
+class LexerAtomRule:
     def __init__(self):
-        self.states = []
-        self.patterns = []
-        self.match_mode = []
-        self.regexes = []
+        self.state = None
+        self.match_mode = 0
+        self.pattern = ''
+        self.regex = None
         self.token_handler = None
         self.token_type = None
         self.token_value_handler = None
 
-    def __repr__(self) -> str:
-        s = '(%s, %s) -> ' % (self.states, self.patterns)
+    def __repr__(self):
+        s = '(%s, %s) -> ' % (self.state, self.pattern)
         if self.token_handler:
             s += '(%s)' % (self.token_handler,)
         else:
@@ -90,63 +86,61 @@ class LexerRule:
         return s
 
 
-def _complete_rule(rule: LexerRule, *, reflag: int):
-    rule.match_mode.clear()
-    rule.regexes.clear()
-    for p in rule.patterns:
-        if re.escape(p) == p:
-            rule.match_mode.append(RULE_MATCH_MODE_STR)
-            rule.regexes.append(None)
-        else:
-            rule.match_mode.append(RULE_MATCH_MODE_REG)
-            rule.regexes.append(re.compile(p, reflag))
-
-
 def _create_rule_adder(lexer, *args):
-    if len(args) == 1:
-        state, pattern = None, args[0]
-    elif len(args) == 2:
-        state, pattern = args
-    elif len(args) == 0:
-        raise TypeError('no argument was given')
-    else:
-        raise TypeError('too much arguments were given')
+    # create atom rules
+    rule_list = []
 
-    if pattern == '__error__':
-        return lambda *args: _add_errorf(lexer, state, *args)
-    else:
-        return lambda *args: _add_rule(lexer, state, pattern, *args)
+    def append_rule(state, pattern):
+        rule = LexerAtomRule()
+        rule.pattern, rule.state = pattern, state
+        rule_list.append(rule)
 
+    def parse_target(tar):
+        if len(tar) == 1:
+            pattern, = tar
+            if isinstance(pattern, list):
+                for t in pattern:
+                    if isinstance(t, tuple):
+                        parse_target(t)
+                    else:
+                        parse_target((t,))
+            else:
+                append_rule(None, pattern)
+        elif len(tar) == 2:
+            state, pattern = tar
+            if isinstance(pattern, list):
+                for t in pattern:
+                    if isinstance(t, tuple):
+                        raise TypeError('Duplicate state assignment')
+                    else:
+                        parse_target((state, t))
+            else:
+                if isinstance(state, (list, tuple)):
+                    for s in state:
+                        append_rule(s, pattern)
+                else:
+                    append_rule(state, pattern)
+        else:
+            raise TypeError('Invalid value. Accept only "pattern" or "(state, pattern)".')
 
-def _add_rule(lexer, state, pattern, f=None, value=None):
-    rule = LexerRule()
+    parse_target(args)
 
-    for s in wrap_list(state):
-        if s not in rule.states:
-            rule.states.append(s)
+    def adder(f, value=None):
+        if callable(f):
+            for r in rule_list:
+                r.token_handler = f
+        else:
+            for r in rule_list:
+                if r.pattern == '__error__':
+                    raise TypeError('Error handler must be callable.')
+                r.token_type = f
+                r.token_value_handler = value
 
-    for p in wrap_list(pattern):
-        rule.patterns.append(p)
+        lexer._rules += rule_list
+        if r.token_handler:
+            return f
 
-    if f is None:
-        pass
-    elif callable(f):
-        rule.token_handler = f
-    else:
-        rule.token_type = f
-        rule.token_value_handler = value
-
-    lexer._rules.append(rule)
-    if rule.token_handler:
-        return f
-
-
-def _add_errorf(lexer, state, f):
-    if not callable(f):
-        raise LexError('Error handler must be a function.')
-    for s in wrap_list(state):
-        lexer._errorfs[s] = f
-    return f
+    return adder
 
 
 def _add_states(lexer, state_list):
@@ -169,6 +163,38 @@ def _add_states(lexer, state_list):
         lexer._states[state_name] = state_type
 
 
+def is_pattern_constant(pattern):
+    return re.escape(pattern) == pattern
+
+
+MATCHER_MATCH_MODE_STR = 1
+MATCHER_MATCH_MODE_REG = 2
+MATCHER_HANDLER_TYPE_TOKEN = 1
+MATCHER_HANDLER_TYPE_TPVAL = 2
+
+
+def _compile_lexer(lexer):
+    for state in lexer._states:
+        state_is_inclusive = lexer._states[state] == 'inclusive'
+        matchers, errorf = [], None
+        for r in lexer._rules:
+            # error handler function
+            if r.pattern == '__error__':
+                assert r.token_handler
+                if r.state == state or (state_is_inclusive and r.state is None):
+                    errorf = r.token_handler
+                continue
+            # matching rules
+            if r.state == state or (state_is_inclusive and r.state is None):
+                if not is_pattern_constant(r.pattern):
+                    regex = re.compile(r.pattern, lexer._reflags)
+                    matchers.append((MATCHER_MATCH_MODE_REG, r.pattern, regex, r))  # TODO
+                else:
+                    matchers.append((MATCHER_MATCH_MODE_STR, r.pattern, None, r))
+
+        lexer._compiled[state] = (matchers, errorf)
+
+
 class LexerStoreProxy:
     def __init__(self):
         self._rules = []
@@ -185,32 +211,38 @@ class LexerMeta(type):
         return {'__': lambda *args: _create_rule_adder(proxy, *args)}
 
     def __init__(self, name, bases, namespace):
+        self._compiled = {}
         proxy = self.__class__._store_proxies[name]
-        self._states = proxy._states
-        self._rules = proxy._rules
-        self._errorfs = proxy._errorfs
 
+        # collect rules into lexer
+        self._rules = proxy._rules
+
+        # collect states into lexer
+        self._states = {}
         if hasattr(self, 'states'):
             _add_states(self, self.states)
             del self.states
         else:
             _add_states(self, None)
 
+        # collect options into lexer
         self._options = {}
         if hasattr(self, 'options'):
             self._options.append(self.options)
             del self.options
 
+        # collect reflags into lexer
         if hasattr(self, 'reflags'):
             self._reflags = self.reflags
             del self.reflags
         else:
             self._reflags = re.VERBOSE  # default value
 
-        for r in self._rules:
-            _complete_rule(r, reflag=self._reflags)
+        # compile lexer
+        _compile_lexer(self)
 
-        self.__ = lambda *args: _create_rule_adder(self, self._states, *args)
+        # append class methods used outside the class body
+        self.__ = lambda *args: _create_rule_adder(self, *args)
 
 
 def sample_match(pattern, ignorecase, s, start=0, end=None):
@@ -253,7 +285,7 @@ class Lexer(metaclass=LexerMeta):
         self.lexoptimize = False      # Optimized mode
 
         self._active_state = None
-        self._active_patterns = []
+        self._active_matchers = []
         self._active_errorf = None
 
         self._activate_state('INITIAL')
@@ -271,25 +303,10 @@ class Lexer(metaclass=LexerMeta):
 
     def _activate_state(self, state):
         cls = self.__class__
-
         if state not in cls._states:
             raise ValueError('Undefined state')
-
         self._active_state = state
-        state_is_inclusive = cls._states[state] == 'inclusive'
-
-        self._active_patterns.clear()
-        for r in cls._rules:
-            if state in r.states or (state_is_inclusive and None in r.states):
-                self._active_patterns += \
-                    zip(r.match_mode, r.patterns, r.regexes, [r]*len(r.patterns))
-
-        if state in cls._errorfs:
-            self._active_errorf = cls._errorfs[state]
-        elif state_is_inclusive and None in cls._errorfs:
-            self._active_errorf = cls._errorfs[None]
-        else:
-            self._active_errorf = None
+        self._active_matchers, self._active_errorf = cls._compiled[state]
 
     def begin(self, state):
         return self._activate_state(state)
@@ -315,15 +332,16 @@ class Lexer(metaclass=LexerMeta):
         while lexpos <= lexlen:
             match_obj, match_endpos, match_group, match_len, rule = None, 0, '', 0, None
 
-            for mode, pattern, regex, r in self._active_patterns:
-                if mode == RULE_MATCH_MODE_STR:
+            for matcher in self._active_matchers:
+                match_mode, pattern, regex, r = matcher
+                if match_mode == MATCHER_MATCH_MODE_STR:
                     m_obj = sample_match(pattern, False, lexdata, lexpos)
                     if not m_obj:
                         continue
                     m_group = m_obj
                     m_len = len(m_group)
                     m_endpos = lexpos + m_len
-                elif mode == RULE_MATCH_MODE_REG:
+                elif match_mode == MATCHER_MATCH_MODE_REG:
                     m_obj = regex.match(lexdata, lexpos)
                     if not m_obj:
                         continue

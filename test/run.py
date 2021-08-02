@@ -23,4 +23,11 @@ class LexRunTests(unittest.TestCase):
         self.assertEqual(result, expect)
 
 
+class LexInterfaceTests(unittest.TestCase):
+    def test_lex_intf_rules(self):
+        self.maxDiff = None
+        result, expect = import_case('intf_rules')
+        self.assertEqual(result, expect)
+
+
 unittest.main()
