@@ -1,4 +1,3 @@
-from ast import parse
 import re
 import types
 
@@ -31,42 +30,6 @@ class LexToken:
         return str(self)
 
 
-# This object is a stand-in for a logging object created by the
-# logging module.
-
-class PlyLogger(object):
-    def __init__(self, f):
-        self.f = f
-
-    def critical(self, msg, *args, **kwargs):
-        self.f.write((msg % args) + '\n')
-
-    def warning(self, msg, *args, **kwargs):
-        self.f.write('WARNING: ' + (msg % args) + '\n')
-
-    def error(self, msg, *args, **kwargs):
-        self.f.write('ERROR: ' + (msg % args) + '\n')
-
-    info = critical
-    debug = critical
-
-
-# Null logger is used when no output is generated. Does nothing.
-class NullLogger(object):
-    def __getattribute__(self, name):
-        return self
-
-    def __call__(self, *args, **kwargs):
-        return self
-
-
-def wrap_list(x):
-    if isinstance(x, (tuple, list)):
-        return iter(x)
-    else:
-        return iter([x])
-
-
 class LexerAtomRule:
     def __init__(self):
         self.state = None
@@ -84,8 +47,22 @@ class LexerAtomRule:
         return s
 
 
+def is_pattern_constant(pattern):
+    return re.escape(pattern) == pattern
+
+
+def simple_match(pattern, ignorecase, s, start=0, end=None):
+    if end is None:
+        ss = s[start:start+len(pattern)]
+    else:
+        ss = s[start:min(start+len(pattern), end)]
+    if ignorecase:
+        return (ss if pattern.lower() == ss.lower() else None)
+    else:
+        return (ss if pattern == ss else None)
+
+
 def _create_rule_adder(lexer, *args):
-    # create atom rules
     rule_list = []
 
     def append_rule(state, pattern):
@@ -145,6 +122,7 @@ def _add_states(lexer, state_list):
     lexer._states['INITIAL'] = 'inclusive'
     if state_list is None:
         return
+
     try:
         _ = iter(state_list)
     except TypeError:
@@ -159,10 +137,6 @@ def _add_states(lexer, state_list):
         if state_name in lexer._states:
             raise ValueError("State '%s' already defined" % state_name)
         lexer._states[state_name] = state_type
-
-
-def is_pattern_constant(pattern):
-    return re.escape(pattern) == pattern
 
 
 MATCHER_MATCH_MODE_STR = 1
@@ -242,20 +216,8 @@ class LexerMeta(type):
         else:
             self._reflags = re.VERBOSE  # default value
 
-        # compile lexer
+        # compile lexer rules
         _compile_lexer_rules(self)
-
-
-def sample_match(pattern, ignorecase, s, start=0, end=None):
-    if end is None:
-        ss = s[start:start+len(pattern)]
-    else:
-        ss = s[start:min(start+len(pattern), end)]
-
-    if ignorecase:
-        return (ss if pattern.lower() == ss.lower() else None)
-    else:
-        return (ss if pattern == ss else None)
 
 
 class Lexer(metaclass=LexerMeta):
@@ -330,13 +292,15 @@ class Lexer(metaclass=LexerMeta):
         lexlen = self.lexlen
         lexdata = self.lexdata
 
+        # Allow lexpos == lexlen to make '\Z' (equivalent to EOF here) appliable in regex.
         while lexpos <= lexlen:
+            # Try to find the best match
             match_obj, match_endpos, match_group, match_len, matcher = None, 0, '', 0, None
 
             for mr in self._active_matchers:
                 match_mode, pattern, regex = mr[0:3]
                 if match_mode == MATCHER_MATCH_MODE_STR:
-                    m_obj = sample_match(pattern, False, lexdata, lexpos)
+                    m_obj = simple_match(pattern, False, lexdata, lexpos)
                     if not m_obj:
                         continue
                     m_group = m_obj
@@ -390,13 +354,14 @@ class Lexer(metaclass=LexerMeta):
                         lexpos = match_endpos
                         continue
             elif lexpos == lexlen:
+                # No exception for an EOF missing matched.
                 return None
             else:
                 if self._active_errorf:
                     tok = LexToken()
                     tok.value = self.lexdata[lexpos:]
                     tok.lineno = self.lineno
-                    tok.type = 'error'
+                    tok.type = '__error__'
                     tok.lexer = self
                     tok.lexpos = lexpos
                     self.lexpos = lexpos
