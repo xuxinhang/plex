@@ -1,6 +1,7 @@
 import sys
 import os.path
 import unittest
+from unittest import result
 
 
 sys.path.append(os.path.normpath(os.path.join(__file__, '../..')))
@@ -27,6 +28,10 @@ class LexInterfaceTests(unittest.TestCase):
     def test_lex_intf_rules(self):
         self.maxDiff = None
         result, expect = import_case('intf_rules')
+        self.assertEqual(result, expect)
+
+    def test_lex_reflags_ignorecase(self):
+        result, expect = import_case('reflags_ignorecase')
         self.assertEqual(result, expect)
 
 

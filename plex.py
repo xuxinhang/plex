@@ -75,10 +75,7 @@ def _create_rule_adder(lexer, *args):
             pattern, = tar
             if isinstance(pattern, list):
                 for t in pattern:
-                    if isinstance(t, tuple):
-                        parse_target(t)
-                    else:
-                        parse_target((t,))
+                    parse_target(t if isinstance(t, tuple) else (t,))
             else:
                 append_rule(None, pattern)
         elif len(tar) == 2:
@@ -87,8 +84,7 @@ def _create_rule_adder(lexer, *args):
                 for t in pattern:
                     if isinstance(t, tuple):
                         raise TypeError('Duplicate state assignment')
-                    else:
-                        parse_target((state, t))
+                    parse_target((state, t))
             else:
                 if isinstance(state, (list, tuple)):
                     for s in state:
@@ -101,7 +97,8 @@ def _create_rule_adder(lexer, *args):
     parse_target(args)
 
     def adder(f, value=None):
-        if callable(f):
+        f_callable = callable(f)
+        if f_callable:
             for r in rule_list:
                 r.token_handler = f
         else:
@@ -112,7 +109,7 @@ def _create_rule_adder(lexer, *args):
                 r.token_value_handler = value
 
         lexer._rules += rule_list
-        if r.token_handler:
+        if f_callable:
             return f
 
     return adder
@@ -143,35 +140,6 @@ MATCHER_MATCH_MODE_STR = 1
 MATCHER_MATCH_MODE_REG = 2
 MATCHER_HANDLER_TYPE_TOKEN = 1
 MATCHER_HANDLER_TYPE_TPVAL = 2
-
-
-def _compile_lexer_rules(lexer):
-    for state in lexer._states:
-        state_is_inclusive = lexer._states[state] == 'inclusive'
-        matchers, errorf = [], None
-        for r in lexer._rules:
-            # error handler function
-            if r.pattern == '__error__':
-                assert r.token_handler
-                if r.state == state or (state_is_inclusive and r.state is None):
-                    errorf = r.token_handler
-                continue
-            # matching rules
-            if r.state == state or (state_is_inclusive and r.state is None):
-                if not is_pattern_constant(r.pattern):
-                    regex = re.compile(r.pattern, lexer._reflags)
-                    matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
-                else:
-                    matcher_match = (MATCHER_MATCH_MODE_STR, r.pattern, None)
-
-                if r.token_handler:
-                    matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
-                else:
-                    matcher_handler = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
-
-                matchers.append((*matcher_match, *matcher_handler))
-
-        lexer._compiled[state] = (matchers, errorf)
 
 
 class LexerStoreProxy:
@@ -206,7 +174,7 @@ class LexerMeta(type):
         # collect options into lexer
         self._options = {}
         if hasattr(self, 'options'):
-            self._options.append(self.options)
+            self._options.update(self.options)
             del self.options
 
         # collect reflags into lexer
@@ -217,40 +185,62 @@ class LexerMeta(type):
             self._reflags = re.VERBOSE  # default value
 
         # compile lexer rules
-        _compile_lexer_rules(self)
+        self.compile()
+
+    def compile(self):
+        lexer = self
+
+        # translate collected rules to matchers identified by state
+        for state in lexer._states:
+            state_is_inclusive = lexer._states[state] == 'inclusive'
+            matchers, errorf = [], None
+            for r in lexer._rules:
+                # error handler function
+                if r.pattern == '__error__':
+                    assert r.token_handler
+                    if r.state == state or (state_is_inclusive and r.state is None):
+                        errorf = r.token_handler
+                    continue
+                # matching rules
+                if r.state == state or (state_is_inclusive and r.state is None):
+                    if not is_pattern_constant(r.pattern):
+                        regex = re.compile(r.pattern, lexer._reflags)
+                        matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
+                    else:
+                        matcher_match = (MATCHER_MATCH_MODE_STR, r.pattern, None)
+
+                    if r.token_handler:
+                        matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
+                    else:
+                        matcher_handler = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
+
+                    matchers.append(matcher_match + matcher_handler)
+
+            lexer._compiled[state] = (matchers, errorf)
+
+
+class LexerPropertyStateDescriptor:
+    def __get__(self, obj, objtype=None):
+        return obj._active_state
+
+    def __set__(self, obj, value):
+        raise AttributeError('Can\'t set Lexer\'s state property. Use "begin" method instead.')
 
 
 class Lexer(metaclass=LexerMeta):
+    lexstate = LexerPropertyStateDescriptor()  # Current lexer state
+
     def __init__(self):
-        self.lexre = None             # Master regular expression. This is a list of
-        self.lexretext = None         # Current regular expression strings
-        self.lexstatere = {}          # Dictionary mapping lexer states to master regexs
-        self.lexstateretext = {}      # Dictionary mapping lexer states to regex strings
-        self.lexstaterenames = {}     # Dictionary mapping lexer states to symbol names
-        self.lexstaterules = {}
-        self.lexstate = 'INITIAL'     # Current lexer state
-        self.lexstatestack = []       # Stack of lexer states
-        self.lexstateinfo = None      # State information
-        self.lexstateignore = {}      # Dictionary of ignored characters for each state
-        self.lexstateerrorf = {}      # Dictionary of error functions for each state
-        self.lexstateeoff = {}        # Dictionary of eof functions for each state
-        self.lexreflags = 0           # Optional re compile flags
         self.lexdata = None           # Actual input data (as a string)
-        self.lexpos = 0               # Current position in input text
         self.lexlen = 0               # Length of the input text
-        self.lexerrorf = None         # Error rule (if any)
-        self.lexeoff = None           # EOF rule (if any)
-        self.lextokens = None         # List of valid tokens
-        self.lexignore = ''           # Ignored characters
-        self.lexliterals = ''         # Literal characters that can be passed through
-        self.lexmodule = None         # Module
+        self.lexmatch = None
+        self.lexpos = 0               # Current position in input text
         self.lineno = 1               # Current line number
-        self.lexoptimize = False      # Optimized mode
 
         self._active_state = None
         self._active_matchers = []
         self._active_errorf = None
-
+        self._state_stack = []
         self._activate_state('INITIAL')
 
     # ------------------------------------------------------------
@@ -275,19 +265,21 @@ class Lexer(metaclass=LexerMeta):
         return self._activate_state(state)
 
     def push_state(self, state):
-        self.lexstatestack.append(self.lexstate)
+        self._state_stack.append(self._active_state)
         self._activate_state(state)
 
     def pop_state(self):
-        self._activate_state(self.lexstatestack.pop())
+        self._activate_state(self._state_stack.pop())
 
     def current_state(self):
-        return self.lexstate
+        return self._active_state
 
     def skip(self, n):
         self.lexpos += n
 
     def token(self):
+        cls = self.__class__
+        reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
         lexpos = self.lexpos
         lexlen = self.lexlen
         lexdata = self.lexdata
@@ -300,7 +292,7 @@ class Lexer(metaclass=LexerMeta):
             for mr in self._active_matchers:
                 match_mode, pattern, regex = mr[0:3]
                 if match_mode == MATCHER_MATCH_MODE_STR:
-                    m_obj = simple_match(pattern, False, lexdata, lexpos)
+                    m_obj = simple_match(pattern, reflags_ignorecase, lexdata, lexpos)
                     if not m_obj:
                         continue
                     m_group = m_obj
@@ -319,6 +311,7 @@ class Lexer(metaclass=LexerMeta):
 
             if match_obj:
                 tok = LexToken()
+                tok.type = None
                 tok.value = match_group
                 tok.lineno = self.lineno
                 tok.lexpos = lexpos
@@ -328,21 +321,27 @@ class Lexer(metaclass=LexerMeta):
 
                 if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                     token_handler = matcher[4]
-                    lexpos = match_endpos
 
                     # If token is processed by a function, call it
+                    # Every function should return a token, if not, we just move to next token
                     self.lexmatch = match_obj
-                    self.lexpos = lexpos
+                    lexpos_before = lexpos
+                    self.lexpos = lexpos = match_endpos
                     newtok = token_handler(tok)
+                    lexpos = self.lexpos  # This is required due to case where lexpos has been updated by user.
+                    # Ensure lexpos must change to avoid infinite loop
+                    if lexpos_before == lexpos:
+                        raise LexError('Setting lexpos manually is required for a zero-length match.',
+                                       lexdata[lexpos_before:])
                     if newtok:
                         return newtok
 
-                    # Every function must return a token, if nothing, we just move to next token
-                    lexpos = self.lexpos         # This is here in case user has updated lexpos.
-                    lexignore = self.lexignore      # This is here in case there was a state change
                 elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
                     token_type, token_value_handler = matcher[4:6]
-
+                    # Ensure lexpos must change to avoid infinite loop
+                    if lexpos == match_endpos:
+                        raise LexError('Setting lexpos manually is required for a zero-length match.' + str(matcher),
+                                       lexdata[lexpos:])
                     # If no token type was set, it's an ignored token
                     if token_type:
                         tok.type = token_type
@@ -354,7 +353,7 @@ class Lexer(metaclass=LexerMeta):
                         lexpos = match_endpos
                         continue
             elif lexpos == lexlen:
-                # No exception for an EOF missing matched.
+                # Raise no exception when failing to match an EOF.
                 return None
             else:
                 if self._active_errorf:
