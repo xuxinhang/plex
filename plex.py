@@ -18,8 +18,10 @@ class LexError(Exception):
         self.text = s
 
 
-# Token class.  This class is used to represent the tokens produced.
 class LexToken:
+    """
+    Token class. This class is used to represent the tokens produced.
+    """
     def __init__(self):
         self.type = self.value = self.lineno = self.lexpos = None
 
@@ -47,8 +49,26 @@ class LexerAtomRule:
         return s
 
 
-def is_pattern_constant(pattern):
-    return re.escape(pattern) == pattern
+def get_constant_pattern(pattern):
+    """
+    Validate whether the given pattern is a constant pattern.
+    If yes, return its constant string. Otherwise, return None.
+    """
+    try:
+        # it's an undocumented module, the extra fallback is provided.
+        import sre_parse
+        assert callable(sre_parse.parse)
+    except Exception:
+        return pattern if re.escape(pattern) == pattern else None
+
+    s = ''
+    for t in sre_parse.parse(pattern):
+        if str(t[0]).upper() != 'LITERAL':
+            break
+        s += chr(t[1])
+    else:
+        return s
+    return None
 
 
 def simple_match(pattern, ignorecase, s, start=0, end=None):
@@ -123,11 +143,11 @@ def _add_states(lexer, state_list):
     try:
         _ = iter(state_list)
     except TypeError:
-        raise TypeError('states must be iterable')
+        raise TypeError("'states' must be iterable.")
 
     for s in state_list:
         if not isinstance(s, tuple) or len(s) != 2:
-            raise ValueError("Invalid state specifier %s. Must be a tuple (statename,'exclusive|inclusive')" % repr(s))
+            raise TypeError("Invalid state specifier %s. Must be a tuple (statename,'exclusive|inclusive')" % repr(s))
         state_name, state_type = s
         if not (state_type == 'inclusive' or state_type == 'exclusive'):
             raise ValueError("State type for state %s must be 'inclusive' or 'exclusive'" % state_name)
@@ -203,11 +223,15 @@ class LexerMeta(type):
                     continue
                 # matching rules
                 if r.state == state or (state_is_inclusive and r.state is None):
-                    if not is_pattern_constant(r.pattern):
-                        regex = re.compile(r.pattern, lexer._reflags)
+                    constant_pattern = get_constant_pattern(r.pattern)
+                    if constant_pattern is None:
+                        try:
+                            regex = re.compile(r.pattern, lexer._reflags)
+                        except re.error:
+                            raise re.error('Invalid regex pattern for rule %s' % (r,))
                         matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
                     else:
-                        matcher_match = (MATCHER_MATCH_MODE_STR, r.pattern, None)
+                        matcher_match = (MATCHER_MATCH_MODE_STR, constant_pattern, None)
 
                     if r.token_handler:
                         matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
@@ -224,7 +248,7 @@ class LexerPropertyStateDescriptor:
         return obj._active_state
 
     def __set__(self, obj, value):
-        raise AttributeError('Can\'t set Lexer\'s state property. Use "begin" method instead.')
+        raise AttributeError("Can't set Lexer's state property. Use 'begin' method instead.")
 
 
 class Lexer(metaclass=LexerMeta):
@@ -243,10 +267,10 @@ class Lexer(metaclass=LexerMeta):
         self._state_stack = []
         self._activate_state('INITIAL')
 
-    # ------------------------------------------------------------
-    # input() - Push a new string into the lexer
-    # ------------------------------------------------------------
     def input(self, s):
+        """
+        Push a new string into the lexer.
+        """
         # Pull off the first character to see if s looks like a string
         if not isinstance(s[:1], StringTypes):
             raise ValueError('Expected a string')
@@ -262,22 +286,41 @@ class Lexer(metaclass=LexerMeta):
         self._active_matchers, self._active_errorf = cls._compiled[state]
 
     def begin(self, state):
+        """
+        Change the lexer state.
+        """
         return self._activate_state(state)
 
     def push_state(self, state):
+        """
+        Save the current lexer state and switch to the new.
+        """
         self._state_stack.append(self._active_state)
         self._activate_state(state)
 
     def pop_state(self):
+        """
+        Restore and switch to the previous state.
+        """
         self._activate_state(self._state_stack.pop())
 
     def current_state(self):
+        """
+        Returns the current lexing state.
+        """
         return self._active_state
 
     def skip(self, n):
+        """
+        Skip the next n characters.
+        """
         self.lexpos += n
 
     def token(self):
+        """
+        Return the next token.
+        TODO: Careful tune for performance is needed.
+        """
         cls = self.__class__
         reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
         lexpos = self.lexpos
@@ -328,7 +371,8 @@ class Lexer(metaclass=LexerMeta):
                     lexpos_before = lexpos
                     self.lexpos = lexpos = match_endpos
                     newtok = token_handler(tok)
-                    lexpos = self.lexpos  # This is required due to case where lexpos has been updated by user.
+                    # This is required due to case where lexpos has been updated by user.
+                    lexpos = self.lexpos
                     # Ensure lexpos must change to avoid infinite loop
                     if lexpos_before == lexpos:
                         raise LexError('Setting lexpos manually is required for a zero-length match.',
@@ -340,8 +384,7 @@ class Lexer(metaclass=LexerMeta):
                     token_type, token_value_handler = matcher[4:6]
                     # Ensure lexpos must change to avoid infinite loop
                     if lexpos == match_endpos:
-                        raise LexError('Setting lexpos manually is required for a zero-length match.' + str(matcher),
-                                       lexdata[lexpos:])
+                        raise LexError('Setting lexpos manually is required for zero-length matches', lexdata[lexpos:])
                     # If no token type was set, it's an ignored token
                     if token_type:
                         tok.type = token_type
@@ -377,7 +420,7 @@ class Lexer(metaclass=LexerMeta):
                 self.lexpos = lexpos
                 raise LexError("Illegal character '%s' at index %d" % (lexdata[lexpos], lexpos), lexdata[lexpos:])
 
-        assert False
+        raise AssertionError('Emm...')
 
     # Iterator interface
     def __iter__(self):
