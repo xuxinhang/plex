@@ -1,7 +1,6 @@
 import sys
 import os.path
 import unittest
-from unittest import result
 
 
 sys.path.append(os.path.normpath(os.path.join(__file__, '../..')))
