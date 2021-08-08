@@ -2,7 +2,7 @@ from plex import Lexer
 
 
 class OptionIgnorecaseLexer(Lexer):
-    options = {'ignorecase': True}
+    options = {'case-insensitive': True}
 
     __(r'{.*?}')('BLOCK', lambda s: s[1:-1])
     __(r'if')('IF')

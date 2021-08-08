@@ -2,8 +2,9 @@ from plex import Lexer
 
 
 class InterfaceRulesLexer(Lexer):
+    options = {'case-insensitive': True}
+
     states = [('SA', 'inclusive'), ('SB', 'exclusive')]
-    options = {'ignorecase': True}
 
     __(['SA', 'SB'], r'\d+')('NUMBER_SX', int)
     __(['SA', 'SB'], [r'-', r'_'])('LINE_SX')

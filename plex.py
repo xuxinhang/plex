@@ -219,13 +219,13 @@ class LexerMeta(type):
         del self.__
 
         # collect options into lexer
-        self._options = {'ignorecase': False, 'reflags': re.VERBOSE}
+        self._options = {'case-insensitive': False, 'reflags': re.VERBOSE}
         if hasattr(self, 'options'):
             self._options.update(self.options)
             del self.options
 
         self._reflags = self._options['reflags']\
-            | (re.IGNORECASE if self._options['ignorecase'] else 0)
+            | (re.IGNORECASE if self._options['case-insensitive'] else 0)
 
         # collect states into lexer
         self._states = {'INITIAL': 'inclusive'}
