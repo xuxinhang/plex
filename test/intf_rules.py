@@ -20,29 +20,23 @@ class StateTryLexer(Lexer):
     __('SB', r'&')('SYMBOL_AND_SB', None)
 
     @__([('SA', r'%'), ('SB', r'\$')])
-    def percent_and_dollar(t):
+    def percent_and_dollar(self, t):
         t.type = 'PERCENT_OR_DOLLAR'
         return t
 
     @__([None, 'SB'], r'\n')
-    def next_line(t):
-        if t.lexer._active_state == 'INITIAL':
-            t.lexer.begin('SA')
-        elif t.lexer._active_state == 'SA':
-            t.lexer.begin('SB')
-        elif t.lexer._active_state == 'SB':
-            t.lexer.begin('INITIAL')
-        # sys.__stderr__.write('***\n')
-        # sys.__stderr__.write(str(t.lexer._active_matchers))
-        # sys.__stderr__.write('\n' + t.lexer._active_state + '\n')
+    def next_line(self, t):
+        if self._active_state == 'INITIAL':
+            self.begin('SA')
+        elif self._active_state == 'SA':
+            self.begin('SB')
+        elif self._active_state == 'SB':
+            self.begin('INITIAL')
 
 
 redirect_stdio()
 
 lex = StateTryLexer()
-
-# sys.__stderr__.write(str(lex._rules))
-# sys.__stderr__.write('\n')
 
 lex.input('000@&_Hello\n%-011@Hi\n$&0\n-')
 

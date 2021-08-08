@@ -7,19 +7,19 @@ class HEditLexer(Lexer):
     __(r'[ \t\n]')(None)
 
     @__(r'\d+H.*')  # This grabs all of the remaining text
-    def t_H_EDIT_DESCRIPTOR(t):
+    def t_H_EDIT_DESCRIPTOR(self, t):
         i = t.value.index('H')
         n = eval(t.value[:i])
         # Adjust the tokenizing position
-        t.lexer.lexpos -= len(t.value) - (i+1+n)
+        self.lexpos -= len(t.value) - (i+1+n)
         t.value = t.value[i+1:i+1+n]
         t.type = 'H_EDIT_DESCRIPTOR'
         return t
 
     @__('__error__')
-    def t_error(t):
+    def t_error(self, t):
         print("Illegal character '%s'" % t.value[0])
-        t.lexer.skip(1)
+        self.skip(1)
 
 
 redirect_stdio()

@@ -1,17 +1,6 @@
 from plex import Lexer
 
 
-# tokens = (
-#    'NUMBER',
-#    'PLUS',
-#    'MINUS',
-#    'TIMES',
-#    'DIVIDE',
-#    'LPAREN',
-#    'RPAREN',
-# )
-
-
 class CalcLexer(Lexer):
 
     __(r'\+')('PLUS')
@@ -22,21 +11,21 @@ class CalcLexer(Lexer):
     __(r'\)')('RPAREN')
 
     @__(r'\d+')
-    def t_NUMBER(t):
+    def t_NUMBER(self, t):
         t.type = 'NUMBER'
         t.value = int(t.value)
         return t
 
     @__(r'\n+')
-    def t_newline(t):
-        t.lexer.lineno += len(t.value)
+    def t_newline(self, t):
+        self.lineno += len(t.value)
 
     __(r'[ \t]')(None)
 
     @__('__error__')
-    def t_error(t):
+    def t_error(self, t):
         print("Illegal character '%s'" % t.value[0])
-        t.lexer.skip(1)
+        self.skip(1)
 
 
 print(CalcLexer._rules)

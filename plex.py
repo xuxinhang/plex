@@ -103,7 +103,7 @@ def _create_rule_adder(lexer, *args):
             if isinstance(pattern, list):
                 for t in pattern:
                     if isinstance(t, tuple):
-                        raise TypeError('Duplicate state assignment')
+                        raise TypeError('Duplicate state assignment.')
                     parse_target((state, t))
             else:
                 if isinstance(state, (list, tuple)):
@@ -359,7 +359,6 @@ class Lexer(metaclass=LexerMeta):
                 tok.value = match_group
                 tok.lineno = self.lineno
                 tok.lexpos = lexpos
-                tok.lexer = self
 
                 handler_type = matcher[3]
 
@@ -368,7 +367,7 @@ class Lexer(metaclass=LexerMeta):
                     self.lexmatch = match_obj
                     self.lexpos = lexpos = match_endpos
                     token_handler = matcher[4]
-                    newtok = token_handler(tok)
+                    newtok = token_handler(self, tok)
                     if newtok:
                         return newtok
                     # Ignore this token if nothing returned.
@@ -397,7 +396,7 @@ class Lexer(metaclass=LexerMeta):
                     tok.lexer = self
                     tok.lexpos = lexpos
                     self.lexpos = lexpos
-                    newtok = self._active_errf(tok)
+                    newtok = self._active_errf(self, tok)
                     if lexpos != self.lexpos:
                         lexpos = self.lexpos
                         if not newtok:
@@ -420,7 +419,7 @@ class Lexer(metaclass=LexerMeta):
 
             if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                 self.lexpos = lexpos
-                newtok = handler_token(tok)
+                newtok = handler_token(self, tok)
                 if newtok:
                     return newtok
             elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:

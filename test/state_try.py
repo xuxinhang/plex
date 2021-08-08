@@ -17,20 +17,20 @@ class StateTryLexer(Lexer):
     __(r'\d+')('NUMBER')
 
     @__(r'/\*')
-    def t_comment(t):
-        t.lexer.begin('comment')
+    def t_comment(self, t):
+        self.begin('comment')
         print("Entering comment state")
 
     @__('comment', r'(.|\n)*\*/')
-    def t_comment_body_part(t):
+    def t_comment_body_part(self, t):
         t.type = 'body_part'
         print("comment body %s" % t)
-        t.lexer.begin('INITIAL')
+        self.begin('INITIAL')
 
     __(('INITIAL', 'comment'), r'[ \t]')(None)
 
     @__(('INITIAL', 'comment'), '__error__')
-    def t_error(t):
+    def t_error(self, t):
         pass
 
 

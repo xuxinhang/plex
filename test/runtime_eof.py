@@ -8,20 +8,20 @@ class RuntimeEofLexer(Lexer):
     __(r'\w+')('WORD')
 
     @__(r'/\*')
-    def t_comment(t):
-        t.lexer.begin('comment')
+    def t_comment(self, t):
+        self.begin('comment')
 
     @__('comment', r'(.|\n)*\*/')
-    def t_comment_body_part(t):
+    def t_comment_body_part(self, t):
         t.type = 'COMMENT'
         t.value = t.value[:-2]
-        t.lexer.begin('INITIAL')
+        self.begin('INITIAL')
         return t
 
     @__('__eof__')
-    def t_eof(t):
+    def t_eof(self, t):
         t.type = 'EOF'
-        t.lexer.lineno += 1
+        self.lineno += 1
         return t
 
 
