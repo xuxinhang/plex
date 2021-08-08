@@ -1,4 +1,3 @@
-import re
 import sys
 from plex import Lexer
 from test_utils import redirect_stdio, restore_stdio
@@ -6,7 +5,7 @@ from test_utils import redirect_stdio, restore_stdio
 
 class StateTryLexer(Lexer):
     states = [('SA', 'inclusive'), ('SB', 'exclusive')]
-    reflags = re.IGNORECASE
+    options = {'ignorecase': True}
 
     __(['SA', 'SB'], r'\d+')('NUMBER_SX', int)
     __(['SA', 'SB'], [r'-', r'_'])('LINE_SX')

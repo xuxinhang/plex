@@ -1,11 +1,10 @@
-import re
 import sys
 from plex import Lexer
 from test_utils import redirect_stdio, restore_stdio
 
 
 class ReflagsIgnorecaseLexer(Lexer):
-    reflags = re.IGNORECASE
+    options = {'ignorecase': True}
 
     __(r'{.*?}')('BLOCK', lambda s: s[1:-1])
     __(r'if')('IF')
