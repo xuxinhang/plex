@@ -135,11 +135,7 @@ def _create_rule_adder(lexer, *args):
     return adder
 
 
-def _add_states(lexer, state_list):
-    lexer._states['INITIAL'] = 'inclusive'
-    if state_list is None:
-        return
-
+def _normalize_states(lexer, state_list):
     try:
         _ = iter(state_list)
     except TypeError:
@@ -162,6 +158,40 @@ MATCHER_HANDLER_TYPE_TOKEN = 1
 MATCHER_HANDLER_TYPE_TPVAL = 2
 
 
+def _compile_rules(lexer):
+    # translate collected rules to matchers identified by state
+    for state in lexer._states:
+        state_is_inclusive = lexer._states[state] == 'inclusive'
+        matchers, errorf = [], None
+        for r in lexer._rules:
+            # error handler function
+            if r.pattern == '__error__':
+                assert r.token_handler
+                if r.state == state or (state_is_inclusive and r.state is None):
+                    errorf = r.token_handler
+                continue
+            # matching rules
+            if r.state == state or (state_is_inclusive and r.state is None):
+                constant_pattern = get_constant_pattern(r.pattern)
+                if constant_pattern is None:
+                    try:
+                        regex = re.compile(r.pattern, lexer._reflags)
+                    except re.error:
+                        raise re.error('Invalid regex pattern for rule %s' % (r,))
+                    matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
+                else:
+                    matcher_match = (MATCHER_MATCH_MODE_STR, constant_pattern, None)
+
+                if r.token_handler:
+                    matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
+                else:
+                    matcher_handler = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
+
+                matchers.append(matcher_match + matcher_handler)
+
+        lexer._compiled[state] = (matchers, errorf)
+
+
 class LexerStoreProxy:
     def __init__(self):
         self._rules = []
@@ -176,23 +206,11 @@ class LexerMeta(type):
         return {'__': lambda *args: _create_rule_adder(proxy, *args)}
 
     def __init__(self, name, bases, namespace):
+        # clean useless attributes
         del self.__
-        self._compiled = {}
-        proxy = self.__class__._store_proxies[name]
-
-        # collect rules into lexer
-        self._rules = proxy._rules
-
-        # collect states into lexer
-        self._states = {}
-        if hasattr(self, 'states'):
-            _add_states(self, self.states)
-            del self.states
-        else:
-            _add_states(self, None)
 
         # collect options into lexer
-        self._options = {}
+        self._options = {'ignorecase': False, 'reflags': re.VERBOSE}
         if hasattr(self, 'options'):
             self._options.update(self.options)
             del self.options
@@ -204,56 +222,20 @@ class LexerMeta(type):
         else:
             self._reflags = re.VERBOSE  # default value
 
-        # compile lexer rules
-        self.compile()
+        # collect states into lexer
+        self._states = {'INITIAL': 'inclusive'}
+        if hasattr(self, 'states'):
+            _normalize_states(self, self.states)
+            del self.states
 
-    def compile(self):
-        lexer = self
-
-        # translate collected rules to matchers identified by state
-        for state in lexer._states:
-            state_is_inclusive = lexer._states[state] == 'inclusive'
-            matchers, errorf = [], None
-            for r in lexer._rules:
-                # error handler function
-                if r.pattern == '__error__':
-                    assert r.token_handler
-                    if r.state == state or (state_is_inclusive and r.state is None):
-                        errorf = r.token_handler
-                    continue
-                # matching rules
-                if r.state == state or (state_is_inclusive and r.state is None):
-                    constant_pattern = get_constant_pattern(r.pattern)
-                    if constant_pattern is None:
-                        try:
-                            regex = re.compile(r.pattern, lexer._reflags)
-                        except re.error:
-                            raise re.error('Invalid regex pattern for rule %s' % (r,))
-                        matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
-                    else:
-                        matcher_match = (MATCHER_MATCH_MODE_STR, constant_pattern, None)
-
-                    if r.token_handler:
-                        matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
-                    else:
-                        matcher_handler = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
-
-                    matchers.append(matcher_match + matcher_handler)
-
-            lexer._compiled[state] = (matchers, errorf)
-
-
-class LexerPropertyStateDescriptor:
-    def __get__(self, obj, objtype=None):
-        return obj._active_state
-
-    def __set__(self, obj, value):
-        raise AttributeError("Can't set Lexer's state property. Use 'begin' method instead.")
+        # collect rules into lexer and then compile them
+        proxy = self.__class__._store_proxies[name]
+        self._rules = proxy._rules
+        self._compiled = {}
+        _compile_rules(self)
 
 
 class Lexer(metaclass=LexerMeta):
-    lexstate = LexerPropertyStateDescriptor()  # Current lexer state
-
     def __init__(self):
         self.lexdata = None           # Actual input data (as a string)
         self.lexlen = 0               # Length of the input text
@@ -266,6 +248,16 @@ class Lexer(metaclass=LexerMeta):
         self._active_errorf = None
         self._state_stack = []
         self._activate_state('INITIAL')
+
+        # shortcuts to lexer class attributes
+        cls = self.__class__
+        self.lexerstates = cls._states
+        self.lexeroptions = cls._options
+        self.lexerrules = cls._rules
+
+    @property
+    def lexstate(self):
+        return self._active_state
 
     def input(self, s):
         """
