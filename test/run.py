@@ -34,4 +34,10 @@ class LexInterfaceTests(unittest.TestCase):
         self.assertEqual(result, expect)
 
 
+class LexRuntimeTests(unittest.TestCase):
+    def test_lex_runtime_eof(self):
+        result, expect = import_case('runtime_eof')
+        self.assertEqual(result, expect)
+
+
 unittest.main()

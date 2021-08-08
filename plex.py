@@ -162,16 +162,25 @@ def _compile_rules(lexer):
     # translate collected rules to matchers identified by state
     for state in lexer._states:
         state_is_inclusive = lexer._states[state] == 'inclusive'
-        matchers, errorf = [], None
+        matchers, errf, eoff = [], None, None
         for r in lexer._rules:
-            # error handler function
-            if r.pattern == '__error__':
-                assert r.token_handler
-                if r.state == state or (state_is_inclusive and r.state is None):
-                    errorf = r.token_handler
+            if not(r.state == state or (state_is_inclusive and r.state is None)):
                 continue
-            # matching rules
-            if r.state == state or (state_is_inclusive and r.state is None):
+            if r.pattern == '__error__':
+                # error handler function
+                if not r.token_handler:
+                    raise TypeError('Error handler must be a function.')
+                if errf is None:
+                    errf = r.token_handler
+            elif r.pattern == '__eof__':
+                # EOF handler
+                if eoff is None:
+                    if r.token_handler:
+                        eoff = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
+                    else:
+                        eoff = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
+            else:
+                # general rules
                 constant_pattern = get_constant_pattern(r.pattern)
                 if constant_pattern is None:
                     try:
@@ -189,7 +198,7 @@ def _compile_rules(lexer):
 
                 matchers.append(matcher_match + matcher_handler)
 
-        lexer._compiled[state] = (matchers, errorf)
+        lexer._compiled[state] = (matchers, errf, eoff)
 
 
 class LexerStoreProxy:
@@ -233,6 +242,8 @@ class LexerMeta(type):
 
 class Lexer(metaclass=LexerMeta):
     def __init__(self):
+        cls = self.__class__
+
         self.lexdata = None           # Actual input data (as a string)
         self.lexlen = 0               # Length of the input text
         self.lexmatch = None
@@ -241,12 +252,14 @@ class Lexer(metaclass=LexerMeta):
 
         self._active_state = None
         self._active_matchers = []
-        self._active_errorf = None
+        self._active_errf = None
+        self._active_eoff = None
         self._state_stack = []
         self._activate_state('INITIAL')
 
+        self._reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
+
         # shortcuts to lexer class attributes
-        cls = self.__class__
         self.lexerstates = cls._states
         self.lexeroptions = cls._options
         self.lexerrules = cls._rules
@@ -271,7 +284,7 @@ class Lexer(metaclass=LexerMeta):
         if state not in cls._states:
             raise ValueError('Undefined state')
         self._active_state = state
-        self._active_matchers, self._active_errorf = cls._compiled[state]
+        self._active_matchers, self._active_errf, self._active_eoff = cls._compiled[state]
 
     def begin(self, state):
         """
@@ -309,14 +322,12 @@ class Lexer(metaclass=LexerMeta):
         Return the next token.
         TODO: Careful tune for performance is needed.
         """
-        cls = self.__class__
-        reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
+        reflags_ignorecase = self._reflags_ignorecase
         lexpos = self.lexpos
         lexlen = self.lexlen
         lexdata = self.lexdata
 
-        # Allow lexpos == lexlen to make '\Z' (equivalent to EOF here) appliable in regex.
-        while lexpos <= lexlen:
+        while lexpos < lexlen:
             # Try to find the best match
             match_obj, match_endpos, match_group, match_len, matcher = None, 0, '', 0, None
 
@@ -338,9 +349,11 @@ class Lexer(metaclass=LexerMeta):
                     m_endpos = m_obj.end()
 
                 if match_obj is None or m_len > match_len:
-                    match_obj, match_endpos, match_group, match_len, matcher = m_obj, m_endpos, m_group, m_len, mr
+                    match_obj, match_endpos, match_group, match_len, matcher\
+                        = m_obj, m_endpos, m_group, m_len, mr
 
-            if match_obj:
+            if match_obj is not None:
+                # Create a token as the return value
                 tok = LexToken()
                 tok.type = None
                 tok.value = match_group
@@ -351,28 +364,19 @@ class Lexer(metaclass=LexerMeta):
                 handler_type = matcher[3]
 
                 if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
-                    token_handler = matcher[4]
-
-                    # If token is processed by a function, call it
-                    # Every function should return a token, if not, we just move to next token
+                    # Call the token handler
                     self.lexmatch = match_obj
-                    lexpos_before = lexpos
                     self.lexpos = lexpos = match_endpos
+                    token_handler = matcher[4]
                     newtok = token_handler(tok)
-                    # This is required due to case where lexpos has been updated by user.
-                    lexpos = self.lexpos
-                    # Ensure lexpos must change to avoid infinite loop
-                    if lexpos_before == lexpos:
-                        raise LexError('Setting lexpos manually is required for a zero-length match.',
-                                       lexdata[lexpos_before:])
                     if newtok:
                         return newtok
+                    # Ignore this token if nothing returned.
+                    lexpos = self.lexpos
+                    continue
 
                 elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
                     token_type, token_value_handler = matcher[4:6]
-                    # Ensure lexpos must change to avoid infinite loop
-                    if lexpos == match_endpos:
-                        raise LexError('Setting lexpos manually is required for zero-length matches', lexdata[lexpos:])
                     # If no token type was set, it's an ignored token
                     if token_type:
                         tok.type = token_type
@@ -383,11 +387,9 @@ class Lexer(metaclass=LexerMeta):
                     else:
                         lexpos = match_endpos
                         continue
-            elif lexpos == lexlen:
-                # Raise no exception when failing to match an EOF.
-                return None
             else:
-                if self._active_errorf:
+                # No match. There is an error.
+                if self._active_errf:
                     tok = LexToken()
                     tok.value = self.lexdata[lexpos:]
                     tok.lineno = self.lineno
@@ -395,20 +397,41 @@ class Lexer(metaclass=LexerMeta):
                     tok.lexer = self
                     tok.lexpos = lexpos
                     self.lexpos = lexpos
-                    newtok = self._active_errorf(tok)
-                    if lexpos == self.lexpos:
-                        # Error method didn't change text position at all. This is an error.
-                        raise LexError("Scanning error. Illegal character '%s'" % (lexdata[lexpos]), lexdata[lexpos:])
-                    lexpos = self.lexpos
-                    if newtok:
+                    newtok = self._active_errf(tok)
+                    if lexpos != self.lexpos:
+                        lexpos = self.lexpos
+                        if not newtok:
+                            continue
                         return newtok
-                    else:
-                        continue
+                    # Error method didn't change text position at all. This is an error.
 
                 self.lexpos = lexpos
                 raise LexError("Illegal character '%s' at index %d" % (lexdata[lexpos], lexpos), lexdata[lexpos:])
 
-        raise AssertionError('Emm...')
+        # EOF here
+        if self._active_eoff:
+            tok = LexToken()
+            tok.type = '__eof__'
+            tok.lineno = self.lineno
+            tok.lexpos = lexpos
+            tok.lexer = self
+
+            handler_type, handler_token, _ = self._active_eoff
+
+            if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
+                self.lexpos = lexpos
+                newtok = handler_token(tok)
+                if newtok:
+                    return newtok
+            elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
+                if handler_token is not None:
+                    tok.type = handler_token
+                    return tok
+
+        self.lexpos = lexpos + 1
+        if self.lexdata is None:
+            raise RuntimeError('No input string given with input()')
+        return None
 
     # Iterator interface
     def __iter__(self):
