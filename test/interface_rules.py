@@ -1,9 +1,7 @@
-import sys
 from plex import Lexer
-from test_utils import redirect_stdio, restore_stdio
 
 
-class StateTryLexer(Lexer):
+class InterfaceRulesLexer(Lexer):
     states = [('SA', 'inclusive'), ('SB', 'exclusive')]
     options = {'ignorecase': True}
 
@@ -34,16 +32,13 @@ class StateTryLexer(Lexer):
             self.begin('INITIAL')
 
 
-redirect_stdio()
-
-lex = StateTryLexer()
-
+lex = InterfaceRulesLexer()
 lex.input('000@&_Hello\n%-011@Hi\n$&0\n-')
 
+result = ''
 for tok in lex:
-    sys.stdout.write('%s=%r (%d,%d)\n' % (tok.type, tok.value, tok.lineno, tok.lexpos))
+    result += '%s=%r (%d,%d)\n' % (tok.type, tok.value, tok.lineno, tok.lexpos)
 
-result = sys.stdout.getvalue()
 expect = """\
 NUMBER=0 (1,0)
 SYMBOL_AT='@' (1,3)
@@ -60,5 +55,3 @@ SYMBOL_AND_SB='&' (1,22)
 NUMBER_SX=0 (1,23)
 LINE='-' (1,25)
 """
-
-restore_stdio()

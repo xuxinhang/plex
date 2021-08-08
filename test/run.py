@@ -26,17 +26,19 @@ class LexRunTests(unittest.TestCase):
 class LexInterfaceTests(unittest.TestCase):
     def test_lex_intf_rules(self):
         self.maxDiff = None
-        result, expect = import_case('intf_rules')
-        self.assertEqual(result, expect)
-
-    def test_lex_reflags_ignorecase(self):
-        result, expect = import_case('reflags_ignorecase')
+        result, expect = import_case('interface_rules')
         self.assertEqual(result, expect)
 
 
 class LexRuntimeTests(unittest.TestCase):
     def test_lex_runtime_eof(self):
         result, expect = import_case('runtime_eof')
+        self.assertEqual(result, expect)
+
+
+class LexOptionTests(unittest.TestCase):
+    def test_lex_runtime_eof(self):
+        result, expect = import_case('option_ignorecase')
         self.assertEqual(result, expect)
 
 

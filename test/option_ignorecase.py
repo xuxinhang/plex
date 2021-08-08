@@ -1,9 +1,7 @@
-import sys
 from plex import Lexer
-from test_utils import redirect_stdio, restore_stdio
 
 
-class ReflagsIgnorecaseLexer(Lexer):
+class OptionIgnorecaseLexer(Lexer):
     options = {'ignorecase': True}
 
     __(r'{.*?}')('BLOCK', lambda s: s[1:-1])
@@ -14,14 +12,7 @@ class ReflagsIgnorecaseLexer(Lexer):
     __(r'\s')(None)
 
 
-redirect_stdio()
-
-lex = ReflagsIgnorecaseLexer()
-lex.input('If {Condition} Then {Statement} Else {Statement} Fi')
-for tok in lex:
-    sys.stdout.write('%s=%r (%d,%d)\n' % (tok.type, tok.value, tok.lineno, tok.lexpos))
-
-result = sys.stdout.getvalue()
+result = ''
 expect = """\
 IF='If' (1,0)
 BLOCK='Condition' (1,3)
@@ -32,4 +23,8 @@ BLOCK='Statement' (1,37)
 FI='Fi' (1,49)
 """
 
-restore_stdio()
+
+lex = OptionIgnorecaseLexer()
+lex.input('If {Condition} Then {Statement} Else {Statement} Fi')
+for tok in lex:
+    result += '%s=%r (%d,%d)\n' % (tok.type, tok.value, tok.lineno, tok.lexpos)
