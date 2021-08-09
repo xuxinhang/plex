@@ -82,6 +82,15 @@ def simple_match(pattern, ignorecase, s, start=0, end=None):
         return (ss if pattern == ss else None)
 
 
+def deep_format(s, d):
+    regex = re.compile(r'\{[_a-zA-Z][-_a-zA-Z0-9]*?\}')
+    repl = lambda m: '(' + d[m.group()[1:-1]] + ')'  # noqa: E731
+    p = ''
+    while p != s:
+        p, s = s, re.sub(regex, repl, s)
+    return s
+
+
 def _create_rule_adder(lexer, *args):
     rule_list = []
 
@@ -181,15 +190,16 @@ def _compile_rules(lexer):
                         eoff = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
             else:
                 # general rules
-                constant_pattern = get_constant_pattern(r.pattern)
-                if constant_pattern is None:
+                pat = deep_format(r.pattern, lexer._definitions)
+                const_pat = get_constant_pattern(pat)
+                if const_pat is None:
                     try:
-                        regex = re.compile(r.pattern, lexer._reflags)
+                        regex = re.compile(pat, lexer._reflags)
                     except re.error:
                         raise re.error('Invalid regex pattern for rule %s' % (r,))
-                    matcher_match = (MATCHER_MATCH_MODE_REG, r.pattern, regex)
+                    matcher_match = (MATCHER_MATCH_MODE_REG, pat, regex)
                 else:
-                    matcher_match = (MATCHER_MATCH_MODE_STR, constant_pattern, None)
+                    matcher_match = (MATCHER_MATCH_MODE_STR, const_pat, None)
 
                 if r.token_handler:
                     matcher_handler = (MATCHER_HANDLER_TYPE_TOKEN, r.token_handler, None)
@@ -232,6 +242,12 @@ class LexerMeta(type):
         if hasattr(self, 'states'):
             _normalize_states(self, self.states)
             del self.states
+
+        # collect definitions into lexer
+        self._definitions = {}
+        if hasattr(self, 'definitions'):
+            self._definitions.update(self.definitions)
+            del self.definitions
 
         # collect rules into lexer and then compile them
         proxy = self.__class__._store_proxies[name]
