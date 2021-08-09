@@ -258,6 +258,8 @@ class Lexer(metaclass=LexerMeta):
         self._activate_state('INITIAL')
 
         self._reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
+        self._assigned_next_lexpos = -1
+        self._lexpos_current = 0
 
         # shortcuts to lexer class attributes
         self.lexerstates = cls._states
@@ -317,6 +319,14 @@ class Lexer(metaclass=LexerMeta):
         """
         self.lexpos += n
 
+    def less(self, n):
+        """
+        Push back all but the first n characters of the token.
+        """
+        if self._assigned_next_lexpos == -1:
+            self._assigned_next_lexpos = self._lexpos_current
+        self._assigned_next_lexpos += n
+
     def token(self):
         """
         Return the next token.
@@ -352,6 +362,9 @@ class Lexer(metaclass=LexerMeta):
                     match_obj, match_endpos, match_group, match_len, matcher\
                         = m_obj, m_endpos, m_group, m_len, mr
 
+            # Clean values able to be modified from exteral.
+            self._assigned_next_lexpos = -1
+
             if match_obj is not None:
                 # Create a token as the return value
                 tok = LexToken()
@@ -359,21 +372,25 @@ class Lexer(metaclass=LexerMeta):
                 tok.value = match_group
                 tok.lineno = self.lineno
                 tok.lexpos = lexpos
+                tok.lexer = self
 
                 handler_type = matcher[3]
 
                 if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                     # Call the token handler
                     self.lexmatch = match_obj
+                    self._lexpos_current = lexpos
                     self.lexpos = lexpos = match_endpos
-                    token_handler = matcher[4]
-                    newtok = token_handler(self, tok)
+                    newtok = matcher[4](self, tok)
+                    if self._assigned_next_lexpos == -1:
+                        lexpos = self.lexpos
+                    else:
+                        lexpos = self._assigned_next_lexpos
                     if newtok:
+                        self.lexpos = lexpos
                         return newtok
                     # Ignore this token if nothing returned.
-                    lexpos = self.lexpos
                     continue
-
                 elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
                     token_type, token_value_handler = matcher[4:6]
                     # If no token type was set, it's an ignored token
@@ -383,9 +400,8 @@ class Lexer(metaclass=LexerMeta):
                             tok.value = token_value_handler(tok.value)
                         self.lexpos = match_endpos
                         return tok
-                    else:
-                        lexpos = match_endpos
-                        continue
+                    lexpos = match_endpos
+                    continue
             else:
                 # No match. There is an error.
                 if self._active_errf:

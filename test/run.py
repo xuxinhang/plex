@@ -29,6 +29,10 @@ class LexInterfaceTests(unittest.TestCase):
         result, expect = import_case('interface_rules')
         self.assertEqual(result, expect)
 
+    def test_lex_intf_less(self):
+        result, expect = import_case('interface_less')
+        self.assertEqual(result, expect)
+
 
 class LexRuntimeTests(unittest.TestCase):
     def test_lex_runtime_eof(self):
