@@ -21,6 +21,7 @@
 import os
 import sys
 import re
+import time
 from plex import Lexer
 
 
@@ -206,16 +207,18 @@ def tokenize_verilog_source(text):
         sys.exit()
 
     lex = VerilogLexerPlex(error_func=my_error_func)
-    lex.input(text)
 
-    ret = []
-
-    while True:
-        tok = lex.token()
-        if not tok:
-            break  # No more input
-        ret.append('%s %s %d %d\n' %
-                   (tok.value, tok.type, tok.lineno, tok.lexpos))
+    time_start = time.time()
+    for _ in range(1000):
+        ret = []
+        lex.input(text)
+        while True:
+            tok = lex.token()
+            if not tok:
+                break  # No more input
+            ret.append('%s %s %d %d\n' % (tok.value, tok.type, tok.lineno, tok.lexpos))
+    time_end = time.time()
+    sys.stderr.write(str(time_end - time_start) + '\n')
 
     return ''.join(ret)
 
@@ -227,11 +230,3 @@ if __name__ == '__main__':
 
     dump = tokenize_verilog_source(text)
     print(dump)
-
-    # Time cost test
-    import time
-    time_start = time.time()
-    for _ in range(1000):
-        tokenize_verilog_source(text)
-    time_end = time.time()
-    sys.stderr.write(time_end - time_start)

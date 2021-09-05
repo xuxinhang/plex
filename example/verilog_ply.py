@@ -19,6 +19,7 @@ from __future__ import print_function
 import sys
 import os
 import re
+import time
 
 from ply.lex import *
 
@@ -282,17 +283,19 @@ def dump_tokens(text):
 
     lexer = VerilogLexer(error_func=my_error_func)
     lexer.build()
-    lexer.input(text)
-
-    ret = []
 
     # Tokenize
-    while True:
-        tok = lexer.token()
-        if not tok:
-            break  # No more input
-        ret.append("%s %s %d %d\n" %
-                   (tok.value, tok.type, tok.lineno, tok.lexpos))
+    time_start = time.time()
+    for _ in range(1000):
+        ret = []
+        lexer.input(text)
+        while True:
+            tok = lexer.token()
+            if not tok:
+                break  # No more input
+            ret.append("%s %s %d %d\n" % (tok.value, tok.type, tok.lineno, tok.lexpos))
+    time_end = time.time()
+    sys.stderr.write(str(time_end - time_start) + '\n')
 
     return ''.join(ret)
 
@@ -302,12 +305,4 @@ if __name__ == '__main__':
     with open(fname) as fd:
         text = fd.read()
 
-    # print(dump_tokens(text))
-
-    # Time cost test
-    import time
-    time_start = time.time()
-    for _ in range(1000):
-        dump_tokens(text)
-    time_end = time.time()
-    print(time_end - time_start)
+    print(dump_tokens(text))

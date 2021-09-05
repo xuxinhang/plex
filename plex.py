@@ -61,13 +61,18 @@ def get_constant_pattern(pattern):
     except Exception:
         return pattern if re.escape(pattern) == pattern else None
 
-    s = ''
-    for t in sre_parse.parse(pattern):
+    try:
+        ts = sre_parse.parse(pattern)
+    except re.error:
+        raise
+
+    chars = []
+    for t in ts:
         if str(t[0]).upper() != 'LITERAL':
             break
-        s += chr(t[1])
+        chars.append(t[1])
     else:
-        return s
+        return ''.join((chr(c) for c in chars))
     return None
 
 
@@ -191,12 +196,15 @@ def _compile_rules(lexer):
             else:
                 # general rules
                 pat = deep_format(r.pattern, lexer._definitions)
-                const_pat = get_constant_pattern(pat)
+                try:
+                    const_pat = get_constant_pattern(pat)
+                except re.error:
+                    raise re.error('Invalid regex pattern %s for rule %s' % (pat, r))
                 if const_pat is None:
                     try:
                         regex = re.compile(pat, lexer._reflags)
                     except re.error:
-                        raise re.error('Invalid regex pattern for rule %s' % (r,))
+                        raise re.error('Invalid regex pattern %s for rule %s' % (pat, r))
                     matcher_match = (MATCHER_MATCH_MODE_REG, pat, regex)
                 else:
                     matcher_match = (MATCHER_MATCH_MODE_STR, const_pat, None)
@@ -275,7 +283,10 @@ class Lexer(metaclass=LexerMeta):
 
         self._reflags_ignorecase = bool(cls._reflags & re.IGNORECASE)
         self._assigned_next_lexpos = -1
+        self._lex_more_buffer = ''
         self._lexpos_current = 0
+        self._lex_current_token = None
+        self._lex_more_mark = False
 
         # shortcuts to lexer class attributes
         self.lexerstates = cls._states
@@ -343,6 +354,12 @@ class Lexer(metaclass=LexerMeta):
             self._assigned_next_lexpos = self._lexpos_current
         self._assigned_next_lexpos += n
 
+    def more(self):
+        """
+        Append the next token to the current one.
+        """
+        self._lex_more_mark = True
+
     def token(self):
         """
         Return the next token.
@@ -384,11 +401,15 @@ class Lexer(metaclass=LexerMeta):
             if match_obj is not None:
                 # Create a token as the return value
                 tok = LexToken()
+                self._lex_current_token = tok
+                tok.lexer = self
                 tok.type = None
-                tok.value = match_group
                 tok.lineno = self.lineno
                 tok.lexpos = lexpos
-                tok.lexer = self
+                if self._lex_more_buffer:
+                    tok.value = self._lex_more_buffer + match_group
+                else:
+                    tok.value = match_group
 
                 handler_type = matcher[3]
 
@@ -398,6 +419,14 @@ class Lexer(metaclass=LexerMeta):
                     self._lexpos_current = lexpos
                     self.lexpos = lexpos = match_endpos
                     newtok = matcher[4](self, tok)
+                    # Store tok.value if self.more has been called
+                    if self._lex_more_mark:
+                        self._lex_more_buffer = tok.value
+                        self._lex_more_mark = False
+                    else:
+                        if self._lex_more_buffer:
+                            self._lex_more_buffer = ''
+                    # Use manually assigned next lexpos first
                     if self._assigned_next_lexpos == -1:
                         lexpos = self.lexpos
                     else:
