@@ -22,14 +22,20 @@ class LexToken:
     """
     Token class. This class is used to represent the tokens produced.
     """
-    def __init__(self):
-        self.type = self.value = self.lineno = self.lexpos = None
+    def __init__(self, *, lexer=None, type=None, text='', leng=None, lineno=None, lexpos=None, value=None):
+        self.lexer = lexer
+        self.type = type
+        self.lexpos = lexpos
 
-    def __str__(self):
-        return 'LexToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
+        self.leng = len(text) if leng is None else leng  # yyleng
+        self.text = text  # yytext
+        self.lineno = lineno  # lineno
+        self.value = value  # yylval
+        self.extra = None  # yyextra
+        self.column = NotImplemented  # yycolumn
 
     def __repr__(self):
-        return str(self)
+        return 'LexToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
 
 
 class LexerAtomRule:
@@ -76,7 +82,7 @@ def get_constant_pattern(pattern):
     return None
 
 
-def simple_match(pattern, ignorecase, s, start=0, end=None):
+def match_constant_pattern(pattern, ignorecase, s, start=0, end=None):
     if end is None:
         ss = s[start:start+len(pattern)]
     else:
@@ -87,7 +93,7 @@ def simple_match(pattern, ignorecase, s, start=0, end=None):
         return (ss if pattern == ss else None)
 
 
-def deep_format(s, d):
+def inject_pattern_definition(s, d):
     regex = re.compile(r'\{[_a-zA-Z][-_a-zA-Z0-9]*?\}')
     repl = lambda m: '(' + d[m.group()[1:-1]] + ')'  # noqa: E731
     p = ''
@@ -195,7 +201,7 @@ def _compile_rules(lexer):
                         eoff = (MATCHER_HANDLER_TYPE_TPVAL, r.token_type, r.token_value_handler)
             else:
                 # general rules
-                pat = deep_format(r.pattern, lexer._definitions)
+                pat = inject_pattern_definition(r.pattern, lexer._definitions)
                 try:
                     const_pat = get_constant_pattern(pat)
                 except re.error:
@@ -358,6 +364,7 @@ class Lexer(metaclass=LexerMeta):
         """
         Append the next token to the current one.
         """
+        # set the mark
         self._lex_more_mark = True
 
     def token(self):
@@ -371,18 +378,22 @@ class Lexer(metaclass=LexerMeta):
         lexdata = self.lexdata
 
         while lexpos < lexlen:
-            # Try to find the best match
+            # Find the best match
             match_obj, match_endpos, match_group, match_len, matcher = None, 0, '', 0, None
 
             for mr in self._active_matchers:
                 match_mode, pattern, regex = mr[0:3]
+
+                # match mode 1: simple string match
                 if match_mode == MATCHER_MATCH_MODE_STR:
-                    m_obj = simple_match(pattern, reflags_ignorecase, lexdata, lexpos)
+                    m_obj = match_constant_pattern(pattern, reflags_ignorecase, lexdata, lexpos)
                     if not m_obj:
                         continue
                     m_group = m_obj
                     m_len = len(m_group)
                     m_endpos = lexpos + m_len
+
+                # match mode 2: regex match
                 elif match_mode == MATCHER_MATCH_MODE_REG:
                     m_obj = regex.match(lexdata, lexpos)
                     if not m_obj:
@@ -391,6 +402,7 @@ class Lexer(metaclass=LexerMeta):
                     m_len = len(m_group)
                     m_endpos = m_obj.end()
 
+                # override previous match info
                 if match_obj is None or m_len > match_len:
                     match_obj, match_endpos, match_group, match_len, matcher\
                         = m_obj, m_endpos, m_group, m_len, mr
@@ -399,64 +411,64 @@ class Lexer(metaclass=LexerMeta):
             self._assigned_next_lexpos = -1
 
             if match_obj is not None:
+                # There is a match.
                 # Create a token as the return value
-                tok = LexToken()
+                tok = LexToken(lexer=self, type=None,
+                               text=(self._lex_more_buffer + match_group) if self._lex_more_buffer else match_group,
+                               lineno=self.lineno, lexpos=lexpos)
                 self._lex_current_token = tok
-                tok.lexer = self
-                tok.type = None
-                tok.lineno = self.lineno
-                tok.lexpos = lexpos
-                if self._lex_more_buffer:
-                    tok.value = self._lex_more_buffer + match_group
-                else:
-                    tok.value = match_group
 
                 handler_type = matcher[3]
-
                 if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                     # Call the token handler
                     self.lexmatch = match_obj
                     self._lexpos_current = lexpos
                     self.lexpos = lexpos = match_endpos
-                    newtok = matcher[4](self, tok)
-                    # Store tok.value if self.more has been called
+                    token_handler = matcher[4]
+                    handler_return = token_handler(self, tok)
+
+                    # Store tok.text if self.more has been called
                     if self._lex_more_mark:
-                        self._lex_more_buffer = tok.value
+                        self._lex_more_buffer = tok.text
                         self._lex_more_mark = False
                     else:
-                        if self._lex_more_buffer:
-                            self._lex_more_buffer = ''
+                        self._lex_more_buffer = ''
+
                     # Use manually assigned next lexpos first
                     if self._assigned_next_lexpos == -1:
                         lexpos = self.lexpos
                     else:
                         lexpos = self._assigned_next_lexpos
-                    if newtok:
+
+                    if handler_return is not tok:
+                        tok.type = handler_return
+                    if tok.type is None:
+                        continue  # ignore this token if the token type as None
+                    else:
                         self.lexpos = lexpos
-                        return newtok
-                    # Ignore this token if nothing returned.
-                    continue
+                        return tok  # accept and return the token with a valid token type
+
                 elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
                     token_type, token_value_handler = matcher[4:6]
                     # If no token type was set, it's an ignored token
-                    if token_type:
+                    if token_type is None:
+                        lexpos = match_endpos
+                        continue
+                    else:
                         tok.type = token_type
                         if token_value_handler:
-                            tok.value = token_value_handler(tok.value)
+                            tok.value = token_value_handler(tok.text)
                         self.lexpos = match_endpos
                         return tok
-                    lexpos = match_endpos
-                    continue
+
             else:
                 # No match. There is an error.
                 if self._active_errf:
-                    tok = LexToken()
-                    tok.value = self.lexdata[lexpos:]
-                    tok.lineno = self.lineno
-                    tok.type = '__error__'
-                    tok.lexer = self
-                    tok.lexpos = lexpos
+                    tok = LexToken(lexer=self, type='__error__',
+                                   text=self.lexdata[lexpos:],
+                                   lineno=self.lineno, lexpos=lexpos)
                     self.lexpos = lexpos
+
                     newtok = self._active_errf(self, tok)
                     if lexpos != self.lexpos:
                         lexpos = self.lexpos
@@ -468,23 +480,27 @@ class Lexer(metaclass=LexerMeta):
                 self.lexpos = lexpos
                 raise LexError("Illegal character '%s' at index %d" % (lexdata[lexpos], lexpos), lexdata[lexpos:])
 
-        # EOF here
+        # EOF comes
         if self._active_eoff:
-            tok = LexToken()
-            tok.type = '__eof__'
-            tok.lineno = self.lineno
-            tok.lexpos = lexpos
-            tok.lexer = self
-
             handler_type, handler_token, _ = self._active_eoff
+
+            tok = LexToken(lexer=self, type='__error__', text='',
+                           lineno=self.lineno, lexpos=lexpos)
 
             if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                 self.lexpos = lexpos
-                newtok = handler_token(self, tok)
-                if newtok:
-                    return newtok
+                handler_return = handler_token(self, tok)
+                if handler_return is not tok:
+                    tok.type = handler_return
+                if tok.type is None:
+                    pass
+                else:
+                    return tok
+
             elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
-                if handler_token is not None:
+                if handler_token is None:
+                    pass
+                else:
                     tok.type = handler_token
                     return tok
 

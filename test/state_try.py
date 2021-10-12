@@ -4,17 +4,13 @@ from test_utils import redirect_stdio, restore_stdio
 
 
 class StateTryLexer(Lexer):
-    tokens = [
-        "PLUS",
-        "MINUS",
-        "NUMBER",
-        ]
+    tokens = ["PLUS", "MINUS", "NUMBER"]
 
     states = [('comment', 'exclusive')]
 
     __(r'\+')('PLUS')
     __(r'-')('MINUS')
-    __(r'\d+')('NUMBER')
+    __(r'\d+')('NUMBER', lambda _: _)
 
     @__(r'/\*')
     def t_comment(self, t):
@@ -24,6 +20,7 @@ class StateTryLexer(Lexer):
     @__('comment', r'(.|\n)*\*/')
     def t_comment_body_part(self, t):
         t.type = 'body_part'
+        t.value = t.text
         print("comment body %s" % t)
         self.begin('INITIAL')
 
@@ -44,11 +41,11 @@ for tok in lex:
 result = sys.stdout.getvalue()
 expect = """\
 (NUMBER,'3',1,0)
-(PLUS,'+',1,2)
+(PLUS,None,1,2)
 (NUMBER,'4',1,4)
 Entering comment state
 comment body LexToken(body_part,' This is a comment */',1,8)
-(PLUS,'+',1,30)
+(PLUS,None,1,30)
 (NUMBER,'10',1,32)
 """
 

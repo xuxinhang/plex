@@ -45,7 +45,7 @@ class LexRuntimeTests(unittest.TestCase):
 
 
 class LexOptionTests(unittest.TestCase):
-    def test_lex_runtime_eof(self):
+    def test_lex_option_ignorecase(self):
         result, expect = import_case('option_ignorecase')
         self.assertEqual(result, expect)
 

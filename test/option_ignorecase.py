@@ -5,10 +5,10 @@ class OptionIgnorecaseLexer(Lexer):
     options = {'case-insensitive': True}
 
     __(r'{.*?}')('BLOCK', lambda s: s[1:-1])
-    __(r'if')('IF')
-    __(r'then')('THEN')
-    __(r'else')('ELSE')
-    __(r'fi')('FI')
+    __(r'if')('IF', lambda _: _)
+    __(r'then')('THEN', lambda _: _)
+    __(r'else')('ELSE', lambda _: _)
+    __(r'fi')('FI', lambda _: _)
     __(r'\s')(None)
 
 

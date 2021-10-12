@@ -9,9 +9,9 @@ class InterfaceDefinitionsLexer(Lexer):
         'crlf': r'\r\n',
     }
 
-    __('{crlf}|{cr}|{lf}')('NEWLINE')
+    __('{crlf}|{cr}|{lf}')('NEWLINE', lambda _: _)
     __('^{ws}')(None)
-    __(r'[\w ]+')('INLINE')
+    __(r'[\w ]+')('INLINE', lambda _: _)
 
 
 lex = InterfaceDefinitionsLexer()

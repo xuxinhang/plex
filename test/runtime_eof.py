@@ -5,7 +5,7 @@ class RuntimeEofLexer(Lexer):
     states = [('comment', 'exclusive')]
 
     __(r'[ ]')(None)
-    __(r'\w+')('WORD')
+    __(r'\w+')('WORD', lambda _: _)
 
     @__(r'/\*')
     def t_comment(self, t):
@@ -14,7 +14,7 @@ class RuntimeEofLexer(Lexer):
     @__('comment', r'(.|\n)*\*/')
     def t_comment_body_part(self, t):
         t.type = 'COMMENT'
-        t.value = t.value[:-2]
+        t.value = t.text[:-2]
         self.begin('INITIAL')
         return t
 
