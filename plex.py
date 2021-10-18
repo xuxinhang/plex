@@ -292,8 +292,8 @@ class Lexer(metaclass=LexerMeta):
         self._lex_more_buffer = ''
         self._lexpos_current = 0
         self._lex_current_token = None
-        self._lex_more_mark = False
-        self._lex_terminate_mark = False
+        self._call_mark_more = False
+        self._call_mark_terminate = False
 
         # shortcuts to lexer class attributes
         self.lexerstates = cls._states
@@ -366,13 +366,13 @@ class Lexer(metaclass=LexerMeta):
         Append the next token to the current one.
         """
         # set the mark
-        self._lex_more_mark = True
+        self._call_mark_more = True
 
     def terminate(self):
         """
         Terminates the scanner and returns EOF
         """
-        self._lex_terminate_mark = True
+        self._call_mark_terminate = True
 
     def token(self):
         """
@@ -435,15 +435,15 @@ class Lexer(metaclass=LexerMeta):
                     handler_return = token_handler(self, tok)
 
                     # Terminate and return EOF if self.terminate called
-                    if self._lex_terminate_mark:
-                        self._lex_terminate_mark = False
+                    if self._call_mark_terminate:
+                        self._call_mark_terminate = False
                         self.lexpos = lexpos
                         return None
 
                     # Store tok.text if self.more has been called
-                    if self._lex_more_mark:
+                    if self._call_mark_more:
                         self._lex_more_buffer = tok.text
-                        self._lex_more_mark = False
+                        self._call_mark_more = False
                     else:
                         self._lex_more_buffer = ''
 
