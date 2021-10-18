@@ -293,6 +293,7 @@ class Lexer(metaclass=LexerMeta):
         self._lexpos_current = 0
         self._lex_current_token = None
         self._lex_more_mark = False
+        self._lex_terminate_mark = False
 
         # shortcuts to lexer class attributes
         self.lexerstates = cls._states
@@ -367,6 +368,12 @@ class Lexer(metaclass=LexerMeta):
         # set the mark
         self._lex_more_mark = True
 
+    def terminate(self):
+        """
+        Terminates the scanner and returns EOF
+        """
+        self._lex_terminate_mark = True
+
     def token(self):
         """
         Return the next token.
@@ -426,6 +433,12 @@ class Lexer(metaclass=LexerMeta):
                     self.lexpos = lexpos = match_endpos
                     token_handler = matcher[4]
                     handler_return = token_handler(self, tok)
+
+                    # Terminate and return EOF if self.terminate called
+                    if self._lex_terminate_mark:
+                        self._lex_terminate_mark = False
+                        self.lexpos = lexpos
+                        return None
 
                     # Store tok.text if self.more has been called
                     if self._lex_more_mark:
@@ -493,13 +506,13 @@ class Lexer(metaclass=LexerMeta):
                 if handler_return is not tok:
                     tok.type = handler_return
                 if tok.type is None:
-                    pass
+                    return None
                 else:
                     return tok
 
             elif handler_type == MATCHER_HANDLER_TYPE_TPVAL:
                 if handler_token is None:
-                    pass
+                    return None
                 else:
                     tok.type = handler_token
                     return tok

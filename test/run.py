@@ -33,6 +33,10 @@ class LexInterfaceTests(unittest.TestCase):
         result, expect = import_case('interface_less')
         self.assertEqual(result, expect)
 
+    def test_lex_intf_terminate(self):
+        result, expect = import_case('interface_terminate')
+        self.assertEqual(result, expect)
+
     def test_lex_interface_definitions(self):
         result, expect = import_case('interface_definitions')
         self.assertEqual(result, expect)
