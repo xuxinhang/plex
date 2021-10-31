@@ -345,11 +345,14 @@ class Lexer(metaclass=LexerMeta):
         """
         self._activate_state(self._state_stack.pop())
 
-    def current_state(self):
+    def top_state(self):
         """
         Returns the current lexing state.
         """
         return self._active_state
+
+    def current_state(self):
+        return self.top_state()
 
     def skip(self, n):
         """
