@@ -184,8 +184,12 @@ def _compile_rules(lexer):
         state_is_inclusive = lexer._states[state] == 'inclusive'
         matchers, errf, eoff = [], None, None
         for r in lexer._rules:
-            if not(r.state == state or (state_is_inclusive and r.state is None)):
-                continue
+            if (r.state == state or r.state == '*') or\
+               (r.state is None and state_is_inclusive):
+                pass
+            else:
+                continue  # this rule is not active under this state
+
             if r.pattern == '__error__':
                 # error handler function
                 if not r.token_handler:

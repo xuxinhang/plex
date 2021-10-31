@@ -33,9 +33,11 @@ class InterfaceRulesLexer(Lexer):
         elif self._active_state == 'SB':
             self.begin('INITIAL')
 
+    __('*', r'.')('OTHER', lambda _: _)
+
 
 lex = InterfaceRulesLexer()
-lex.input('000@&_Hello\n%-011@Hi\n$&0\n-')
+lex.input('000@&_*Hello\n(%-011@Hi\n$&0)\n-')
 
 result = ''
 for tok in lex:
@@ -46,14 +48,17 @@ NUMBER=0 (1,0)
 SYMBOL_AT=None (1,3)
 SYMBOL_AND=None (1,4)
 LINE='_' (1,5)
-WORD='Hello' (1,6)
-PERCENT_OR_DOLLAR='%' (1,12)
-LINE_SX='-' (1,13)
-NUMBER_SX=11 (1,14)
-SYMBOL_AT_SA=None (1,17)
-WORD='Hi' (1,18)
-PERCENT_OR_DOLLAR='$' (1,21)
-SYMBOL_AND_SB=None (1,22)
-NUMBER_SX=0 (1,23)
-LINE='-' (1,25)
+OTHER='*' (1,6)
+WORD='Hello' (1,7)
+OTHER='(' (1,13)
+PERCENT_OR_DOLLAR='%' (1,14)
+LINE_SX='-' (1,15)
+NUMBER_SX=11 (1,16)
+SYMBOL_AT_SA=None (1,19)
+WORD='Hi' (1,20)
+PERCENT_OR_DOLLAR='$' (1,23)
+SYMBOL_AND_SB=None (1,24)
+NUMBER_SX=0 (1,25)
+OTHER=')' (1,26)
+LINE='-' (1,28)
 """
