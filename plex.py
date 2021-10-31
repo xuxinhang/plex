@@ -102,41 +102,45 @@ def inject_pattern_definition(s, d):
     return s
 
 
-def _create_rule_adder(lexer, *args):
-    rule_list = []
+class RuleAdder(object):
+    def __init__(self, lexer, targets: list):
+        self.lexer = lexer
+        self.rule_list = []
+        self.preset_targets = targets[:]
 
-    def append_rule(state, pattern):
-        rule = LexerAtomRule()
-        rule.pattern, rule.state = pattern, state
-        rule_list.append(rule)
+    def parse_target(self, tar):
+        rule_list = self.rule_list
 
-    def parse_target(tar):
+        def append_rule(state, pattern):
+            rule = LexerAtomRule()
+            rule.pattern, rule.state = pattern, state
+            rule_list.append(rule)
+
         if len(tar) == 1:
-            pattern, = tar
-            if isinstance(pattern, list):
-                for t in pattern:
-                    parse_target(t if isinstance(t, tuple) else (t,))
-            else:
-                append_rule(None, pattern)
+            state, pattern = None, tar[0]
         elif len(tar) == 2:
             state, pattern = tar
-            if isinstance(pattern, list):
-                for t in pattern:
-                    if isinstance(t, tuple):
-                        raise TypeError('Duplicate state assignment.')
-                    parse_target((state, t))
-            else:
-                if isinstance(state, (list, tuple)):
-                    for s in state:
-                        append_rule(s, pattern)
-                else:
-                    append_rule(state, pattern)
         else:
             raise TypeError('Invalid value. Accept only "pattern" or "(state, pattern)".')
 
-    parse_target(args)
+        if isinstance(pattern, list):
+            for t in pattern:
+                if isinstance(t, tuple):
+                    if state is not None:
+                        raise TypeError('Duplicate state assignment.')
+                    self.parse_target(t)
+                else:
+                    self.parse_target((state, t))
+        elif isinstance(state, (list, tuple)):
+            for s in state:
+                append_rule(s, pattern)
+        else:
+            append_rule(state, pattern)
 
-    def adder(f, value=None):
+    def __call__(self, f, value=None):
+        self.parse_target(self.preset_targets)
+        rule_list = self.rule_list
+
         f_callable = callable(f)
         if f_callable:
             for r in rule_list:
@@ -148,11 +152,16 @@ def _create_rule_adder(lexer, *args):
                 r.token_type = f
                 r.token_value_handler = value
 
-        lexer._rules += rule_list
+        self.lexer._rules += rule_list
         if f_callable:
             return f
 
-    return adder
+    def __enter__(self):
+        return lambda *headers:\
+            self.__class__(self.lexer, self.preset_targets + list(headers))
+
+    def __exit__(self, *args):
+        pass
 
 
 def _normalize_states(lexer, state_list):
@@ -240,7 +249,7 @@ class LexerMeta(type):
     @classmethod
     def __prepare__(cls, name, bases):
         proxy = cls._store_proxies[name] = LexerStoreProxy()
-        return {'__': lambda *args: _create_rule_adder(proxy, *args)}
+        return {'__': RuleAdder(proxy, []).__enter__()}
 
     def __init__(self, name, bases, namespace):
         # clean useless attributes
@@ -504,7 +513,7 @@ class Lexer(metaclass=LexerMeta):
         if self._active_eoff:
             handler_type, handler_token, _ = self._active_eoff
 
-            tok = LexToken(lexer=self, type='__error__', text='',
+            tok = LexToken(lexer=self, type='__eof__', text='',
                            lineno=self.lineno, lexpos=lexpos)
 
             if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
