@@ -173,12 +173,21 @@ def _normalize_states(lexer, state_list):
     for s in state_list:
         if not isinstance(s, tuple) or len(s) != 2:
             raise TypeError("Invalid state specifier %s. Must be a tuple (statename,'exclusive|inclusive')" % repr(s))
-        state_name, state_type = s
-        if not (state_type == 'inclusive' or state_type == 'exclusive'):
+
+        if s[0] == 's' or s[0] == 'x':
+            state_type, state_name = s
+        elif s[1] == 'inclusive' or s[1] == 'exclusive':
+            state_name, state_type = s
+        else:
             raise ValueError("State type for state %s must be 'inclusive' or 'exclusive'" % state_name)
+
         if state_name in lexer._states:
             raise ValueError("State '%s' already defined" % state_name)
-        lexer._states[state_name] = state_type
+        if state_type == 'x' or state_type == 'exclusive':
+            state_flag = 'exclusive'
+        elif state_type == 's' or state_type == 'inclusive':
+            state_flag = 'inclusive'
+        lexer._states[state_name] = state_flag
 
 
 MATCHER_MATCH_MODE_STR = 1
