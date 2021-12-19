@@ -22,20 +22,32 @@ class LexToken:
     """
     Token class. This class is used to represent the tokens produced.
     """
-    def __init__(self, *, lexer=None, type=None, text='', leng=None, lineno=None, lexpos=None, value=None):
+
+    # we mainly use member names from Flex/Bison, ...
+    def __init__(self, *, lexer=None, char=None, text='', leng=None,
+                 lineno=None, lexpos=None, lval=None):
         self.lexer = lexer
-        self.type = type
         self.lexpos = lexpos
 
+        self.char = char  # yychar
         self.leng = len(text) if leng is None else leng  # yyleng
         self.text = text  # yytext
-        self.lineno = lineno  # lineno
-        self.value = value  # yylval
+        self.lineno = lineno  # yylineno
+        self.lval = lval  # yylval
         self.extra = None  # yyextra
         self.column = NotImplemented  # yycolumn
+        self.lloc = None  # yylloc
+
+    # ... but still hold compatible member names from PLY
+    def type_getter(self): return self.char  # noqa
+    def type_setter(self, x): self.char = x  # noqa
+    type = property(type_getter, type_setter)
+    def value_getter(self): return self.lval  # noqa
+    def value_setter(self, x): self.lval = x  # noqa
+    value = property(value_getter, value_setter)
 
     def __repr__(self):
-        return 'LexToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
+        return 'LexToken(%s,%r,%d,%d)' % (self.char, self.lval, self.lineno, self.lexpos)
 
 
 class LexerAtomRule:
@@ -445,7 +457,7 @@ class Lexer(metaclass=LexerMeta):
             if match_obj is not None:
                 # There is a match.
                 # Create a token as the return value
-                tok = LexToken(lexer=self, type=None,
+                tok = LexToken(lexer=self, char=None,
                                text=(self._lex_more_buffer + match_group) if self._lex_more_buffer else match_group,
                                lineno=self.lineno, lexpos=lexpos)
                 self._lex_current_token = tok
@@ -479,8 +491,8 @@ class Lexer(metaclass=LexerMeta):
                         lexpos = self._assigned_next_lexpos
 
                     if handler_return is not tok:
-                        tok.type = handler_return
-                    if tok.type is None:
+                        tok.char = handler_return
+                    if tok.char is None:
                         continue  # ignore this token if the token type as None
                     else:
                         self.lexpos = lexpos
@@ -493,16 +505,16 @@ class Lexer(metaclass=LexerMeta):
                         lexpos = match_endpos
                         continue
                     else:
-                        tok.type = token_type
+                        tok.char = token_type
                         if token_value_handler:
-                            tok.value = token_value_handler(tok.text)
+                            tok.lval = token_value_handler(tok.text)
                         self.lexpos = match_endpos
                         return tok
 
             else:
                 # No match. There is an error.
                 if self._active_errf:
-                    tok = LexToken(lexer=self, type='__error__',
+                    tok = LexToken(lexer=self, char='__error__',
                                    text=self.lexdata[lexpos:],
                                    lineno=self.lineno, lexpos=lexpos)
                     self.lexpos = lexpos
@@ -522,15 +534,15 @@ class Lexer(metaclass=LexerMeta):
         if self._active_eoff:
             handler_type, handler_token, _ = self._active_eoff
 
-            tok = LexToken(lexer=self, type='__eof__', text='',
+            tok = LexToken(lexer=self, char='__eof__', text='',
                            lineno=self.lineno, lexpos=lexpos)
 
             if handler_type == MATCHER_HANDLER_TYPE_TOKEN:
                 self.lexpos = lexpos
                 handler_return = handler_token(self, tok)
                 if handler_return is not tok:
-                    tok.type = handler_return
-                if tok.type is None:
+                    tok.char = handler_return
+                if tok.char is None:
                     return None
                 else:
                     return tok
@@ -539,7 +551,7 @@ class Lexer(metaclass=LexerMeta):
                 if handler_token is None:
                     return None
                 else:
-                    tok.type = handler_token
+                    tok.char = handler_token
                     return tok
 
         self.lexpos = lexpos + 1
